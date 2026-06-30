@@ -1,14 +1,15 @@
 import json
-import os
 import logging
+import os
 import re
-from typing import Dict, Any
+from typing import Any, Dict
 
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-from langchain_community.vectorstores import AzureSearch
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_openai import AzureChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.src.graph.state import VideoAuditState
+from backend.src.services.ingestion import HybridIngestionService
+from backend.src.services.policy_store import format_chunks_for_prompt, search_policy_chunks
 from backend.src.services.video_indexer import YouTubeTranscriptService
 
 logger = logging.getLogger("brand-guardian")
@@ -26,14 +27,9 @@ def _require_env(var_name: str) -> str:
     return value
 
 
-# --- NODE 1: THE INDEXER ---
 def index_video_node(state: VideoAuditState) -> Dict[str, Any]:
-    """
-    Fetches transcript and metadata directly from YouTube Data API v3.
-    No video download, no Azure Video Indexer — fast and reliable.
-    """
     video_url = state.get("video_url")
-    logger.info(f"--- [Node: Indexer] Processing: {video_url} ---")
+    logger.info("--- [Node: Indexer] Processing: %s ---", video_url)
 
     try:
         if not video_url:
@@ -41,79 +37,78 @@ def index_video_node(state: VideoAuditState) -> Dict[str, Any]:
 
         yt_service = YouTubeTranscriptService()
         clean_data = yt_service.extract_data(video_url)
-
-        logger.info("--- [Node: Indexer] Extraction Complete ---")
+        clean_data["ingestion_source"] = "metadata"
+        logger.info("--- [Node: Indexer] Metadata extraction complete ---")
         return clean_data
 
-    except Exception as e:
-        logger.error(f"Video Indexer Failed: {e}")
+    except Exception as exc:
+        logger.error("Video Indexer Failed: %s", exc)
         return {
-            "errors": [str(e)],
+            "errors": [str(exc)],
             "final_status": "FAIL",
-            "final_report": f"Video indexing failed: {str(e)}",
+            "final_report": f"Video indexing failed: {exc}",
             "transcript": "",
             "ocr_text": [],
             "compliance_results": [],
         }
 
 
-# --- NODE 2: THE COMPLIANCE AUDITOR ---
+def enrich_content_node(state: VideoAuditState) -> Dict[str, Any]:
+    video_url = state.get("video_url", "")
+    base_transcript = state.get("transcript", "") or ""
+    logger.info("--- [Node: Enrich] Hybrid ingestion for %s ---", video_url)
+
+    if not video_url or not base_transcript:
+        return {"ingestion_source": "none"}
+
+    try:
+        service = HybridIngestionService()
+        enriched = service.enrich(video_url, base_transcript)
+        logger.info("--- [Node: Enrich] Source=%s ---", enriched.get("ingestion_source"))
+        return enriched
+    except Exception as exc:
+        logger.warning("Enrichment failed, using metadata only: %s", exc)
+        return {"ingestion_source": "metadata"}
+
+
+def _attach_citations(results: list[dict], chunks: list) -> list[dict]:
+    chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
+    enriched = []
+    for item in results:
+        row = dict(item)
+        chunk_id = row.get("chunk_id")
+        if chunk_id and chunk_id in chunk_map:
+            chunk = chunk_map[chunk_id]
+            row.setdefault("citation_source", chunk.source)
+            row.setdefault("citation_excerpt", chunk.content[:500])
+        enriched.append(row)
+    return enriched
+
+
 def audit_content_node(state: VideoAuditState) -> Dict[str, Any]:
-    """
-    Performs Retrieval-Augmented Generation (RAG) to audit the content.
-    """
-    logger.info("--- [Node: Auditor] querying Knowledge Base & LLM ---")
+    logger.info("--- [Node: Auditor] querying Knowledge Base and LLM ---")
 
     transcript = state.get("transcript", "")
-
     if not transcript:
-        logger.warning("No transcript available. Skipping Audit.")
         return {
             "final_status": "FAIL",
-            "final_report": "Audit skipped because video processing failed (No Transcript).",
+            "final_report": "Audit skipped because video processing failed (no content).",
             "compliance_results": [],
         }
 
     try:
-        azure_openai_endpoint    = _require_env("AZURE_OPENAI_ENDPOINT")
-        azure_openai_api_key     = _require_env("AZURE_OPENAI_API_KEY")
-        azure_openai_api_version = _require_env("AZURE_OPENAI_API_VERSION")
-        chat_deployment          = _require_env("AZURE_OPENAI_CHAT_DEPLOYMENT")
-        embed_deployment         = _require_env("AZURE_OPENAI_EMBEDDING_DEPLOYMENT")
-        azure_search_endpoint    = _require_env("AZURE_SEARCH_ENDPOINT")
-        azure_search_key         = _require_env("AZURE_SEARCH_API_KEY")
-        azure_search_index_name  = _require_env("AZURE_SEARCH_INDEX_NAME")
-
-        logger.info(f"Chat deployment: {chat_deployment}")
-        logger.info(f"Embedding deployment: {embed_deployment}")
-
         llm = AzureChatOpenAI(
-            azure_deployment=chat_deployment,
-            azure_endpoint=azure_openai_endpoint,
-            api_key=azure_openai_api_key,
-            openai_api_version=azure_openai_api_version,
+            azure_deployment=_require_env("AZURE_OPENAI_CHAT_DEPLOYMENT"),
+            azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
+            api_key=_require_env("AZURE_OPENAI_API_KEY"),
+            openai_api_version=_require_env("AZURE_OPENAI_API_VERSION"),
             temperature=0.0,
-        )
-
-        embeddings = AzureOpenAIEmbeddings(
-            azure_deployment=embed_deployment,
-            azure_endpoint=azure_openai_endpoint,
-            api_key=azure_openai_api_key,
-            openai_api_version=azure_openai_api_version,
-        )
-
-        vector_store = AzureSearch(
-            azure_search_endpoint=azure_search_endpoint,
-            azure_search_key=azure_search_key,
-            index_name=azure_search_index_name,
-            embedding_function=embeddings.embed_query,
         )
 
         ocr_text = state.get("ocr_text", [])
         query_text = f"{transcript} {' '.join(ocr_text)}".strip()
-
-        docs = vector_store.similarity_search(query_text, k=3)
-        retrieved_rules = "\n\n".join([doc.page_content for doc in docs]) if docs else ""
+        chunks = search_policy_chunks(query_text)
+        retrieved_rules = format_chunks_for_prompt(chunks)
 
         metadata = state.get("video_metadata", {})
         video_title = metadata.get("title", "Unknown")
@@ -121,31 +116,32 @@ def audit_content_node(state: VideoAuditState) -> Dict[str, Any]:
         system_prompt = f"""
 You are a Senior Brand Compliance Auditor specializing in YouTube advertising policy.
 
-OFFICIAL REGULATORY RULES:
+OFFICIAL REGULATORY RULES (each block includes CHUNK_ID and SOURCE):
 {retrieved_rules}
 
 INSTRUCTIONS:
 1. Analyze the video transcript, description, and metadata below.
 2. Identify ANY violations of YouTube Ad Policies or FTC guidelines.
-3. Return strictly valid JSON in the following format:
+3. For each violation you MUST set chunk_id to the CHUNK_ID of the rule you relied on.
+4. Return strictly valid JSON in the following format:
 
 {{
     "compliance_results": [
         {{
             "category": "Claim Validation",
             "severity": "CRITICAL",
-            "description": "Explanation of the violation..."
+            "description": "Explanation of the violation...",
+            "chunk_id": "uuid-from-CHUNK_ID",
+            "citation_source": "filename.pdf",
+            "citation_excerpt": "quoted rule text...",
+            "confidence": "high"
         }}
     ],
     "status": "FAIL",
     "final_report": "Summary of findings..."
 }}
 
-Severity levels:
-- CRITICAL: Must be fixed before ad can run
-- WARNING: Should be reviewed
-- INFO: Minor recommendation
-
+Severity levels: CRITICAL, WARNING, INFO.
 If no violations are found, set "status" to "PASS" and "compliance_results" to [].
 Do not include markdown fences or any text outside the JSON.
 """.strip()
@@ -154,7 +150,8 @@ Do not include markdown fences or any text outside the JSON.
 VIDEO TITLE: {video_title}
 VIDEO METADATA: {metadata}
 TRANSCRIPT: {transcript}
-ON-SCREEN TEXT / DESCRIPTION: {ocr_text}
+ON-SCREEN TEXT: {ocr_text}
+INGESTION SOURCE: {state.get("ingestion_source", "unknown")}
 """.strip()
 
         response = llm.invoke([
@@ -163,28 +160,25 @@ ON-SCREEN TEXT / DESCRIPTION: {ocr_text}
         ])
 
         content = response.content.strip()
-
         if "```" in content:
             match = re.search(r"```(?:json)?\s*(.*?)```", content, re.DOTALL)
             if match:
                 content = match.group(1).strip()
 
         audit_data = json.loads(content)
+        results = _attach_citations(audit_data.get("compliance_results", []), chunks)
 
         return {
-            "compliance_results": audit_data.get("compliance_results", []),
+            "compliance_results": results,
             "final_status": audit_data.get("status", "FAIL"),
             "final_report": audit_data.get("final_report", "No report generated."),
         }
 
-    except Exception as e:
-        logger.error(f"System Error in Auditor Node: {str(e)}")
-        logger.error(
-            f"Raw LLM Response: {response.content if 'response' in locals() else 'None'}"
-        )
+    except Exception as exc:
+        logger.error("System Error in Auditor Node: %s", exc)
         return {
-            "errors": [str(e)],
+            "errors": [str(exc)],
             "final_status": "FAIL",
-            "final_report": f"Auditor node failed: {str(e)}",
+            "final_report": f"Auditor node failed: {exc}",
             "compliance_results": [],
         }

@@ -1,38 +1,28 @@
 import operator
-from typing import Annotated, List, Dict, Optional, Any, TypedDict
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-# 1. Define the Schema for a Single Compliance Result
-# This ensures structural consistency for every issue detected by the AI.
-class ComplianceIssue(TypedDict):
-    category: str           # e.g., "FTC_DISCLOSURE"
-    description: str        # Specific detail of the violation
-    severity: str           # "CRITICAL" | "WARNING"
-    timestamp: Optional[str]# Timestamp of occurrence (if applicable)
 
-# 2. Define the Global Graph State
-class VideoAuditState(TypedDict):
-    """
-    Defines the data schema for the LangGraph execution context.
-    """
-    # --- Input Parameters ---
+class ComplianceIssue(TypedDict, total=False):
+    category: str
+    description: str
+    severity: str
+    timestamp: Optional[str]
+    citation_source: Optional[str]
+    citation_excerpt: Optional[str]
+    chunk_id: Optional[str]
+    confidence: Optional[str]
+
+
+class VideoAuditState(TypedDict, total=False):
     video_url: str
     video_id: str
-
-    # --- Ingestion & Extraction Data ---
-    # Optional because they are populated asynchronously by the Indexer Node.
-    local_file_path: Optional[str]  
-    video_metadata: Dict[str, Any]  # e.g., {"duration": 15, "resolution": "1080p"}
-    transcript: Optional[str]       # Full extracted speech-to-text
-    ocr_text: List[str]             # List of recognized on-screen text
-
-    # --- Analysis Output ---
-    # annotated with operator.add to allow append-only updates from multiple nodes.
+    local_file_path: Optional[str]
+    video_metadata: Dict[str, Any]
+    transcript: Optional[str]
+    ocr_text: List[str]
+    ingestion_source: Optional[str]
+    policy_version_id: Optional[str]
     compliance_results: Annotated[List[ComplianceIssue], operator.add]
-    
-    # --- Final Deliverables ---
-    final_status: str               # "PASS" | "FAIL"
-    final_report: str               # Markdown summary for the frontend
-    
-    # --- System Observability ---
-    # Appends system-level errors (e.g., API timeouts) without halting execution logic.
+    final_status: str
+    final_report: str
     errors: Annotated[List[str], operator.add]

@@ -1,44 +1,84 @@
+import logging
 import os
 import uuid
-import logging
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from contextlib import asynccontextmanager
 from typing import List
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.src.api.routes.admin import router as admin_router
+from backend.src.api.routes.audits import router as audits_router
+from backend.src.api.routes.export import router as export_router
+from backend.src.api.routes.reviews import router as reviews_router
 from backend.src.api.telemetry import setup_telemetry
+from backend.src.auth.dependencies import get_current_user, require_audit_submitter
+from backend.src.auth.models import UserContext
+from backend.src.db.repository import get_current_policy_version, save_audit
+from backend.src.db.session import SessionLocal, get_db
+from backend.src.graph.workflow import app as compliance_graph
+from backend.src.middleware.rate_limit import RateLimitMiddleware
+from backend.src.services.export import DISCLAIMER
+
 setup_telemetry()
 
-from backend.src.graph.workflow import app as compliance_graph
-
 logging.basicConfig(level=logging.INFO)
-# Add these lines right after logging.basicConfig(level=logging.INFO)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.monitor").setLevel(logging.WARNING)
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
 logger = logging.getLogger("api-server")
 
-# ── FastAPI app ──────────────────────────────────────────────────────────────
+
+def _parse_allowed_origins() -> list[str]:
+    raw = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["http://localhost:8000"]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if os.getenv("AUTH_DISABLED", "false").lower() in ("1", "true", "yes"):
+        db = SessionLocal()
+        try:
+            from backend.src.auth.dependencies import ensure_default_team
+
+            ensure_default_team(db)
+        except Exception as exc:
+            logger.warning("Startup bootstrap skipped (database unavailable): %s", exc)
+        finally:
+            db.close()
+    yield
+
+
 app = FastAPI(
     title="Brand Guardian AI API",
-    description="Audits YouTube ad content against YouTube Ad Policies & FTC guidelines.",
-    version="1.0.0"
+    description="Audits YouTube ad content against YouTube Ad Policies and FTC guidelines.",
+    version="3.0.0",
+    lifespan=lifespan,
 )
 
-# ── CORS ─────────────────────────────────────────────────────────────────────
-# Allows the frontend (HTML file or any local origin) to call this API.
-# Tighten origins in production (replace "*" with your actual domain).
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # dev: accept all; prod: ["https://yourdomain.com"]
+    allow_origins=_parse_allowed_origins(),
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Pydantic Models ──────────────────────────────────────────────────────────
+app.include_router(audits_router)
+app.include_router(reviews_router)
+app.include_router(admin_router)
+app.include_router(export_router)
+
+
 class AuditRequest(BaseModel):
     video_url: str
 
@@ -47,31 +87,49 @@ class ComplianceIssue(BaseModel):
     category: str
     severity: str
     description: str
+    citation_source: str | None = None
+    citation_excerpt: str | None = None
+    chunk_id: str | None = None
+    confidence: str | None = None
 
 
 class AuditResponse(BaseModel):
+    audit_id: str | None = None
     session_id: str
     video_id: str
     status: str
+    final_status: str
+    ai_status: str
     final_report: str
+    ingestion_source: str | None = None
     compliance_results: List[ComplianceIssue]
+    disclaimer: str = DISCLAIMER
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────────
+class AuthMeResponse(BaseModel):
+    user_id: str
+    team_id: str
+    email: str | None
+    role: str
+
+
 @app.post("/audit", response_model=AuditResponse)
-async def audit_video(request: AuditRequest):
-    """
-    Triggers a full compliance audit for the given YouTube URL.
-
-    POST /audit
-    Body: { "video_url": "https://youtu.be/..." }
-    """
+async def audit_video(
+    request: AuditRequest,
+    user: UserContext = Depends(require_audit_submitter),
+    db: Session = Depends(get_db),
+):
     session_id = str(uuid.uuid4())
     video_id_short = f"vid_{session_id[:8]}"
 
-    logger.info(f"Audit Request — url={request.video_url}  session={session_id}")
+    logger.info(
+        "Audit request url=%s session=%s user=%s team=%s",
+        request.video_url,
+        session_id,
+        user.user_id,
+        user.team_id,
+    )
 
-    # Basic URL guard — reject non-YouTube URLs early
     if "youtube.com" not in request.video_url and "youtu.be" not in request.video_url:
         raise HTTPException(status_code=400, detail="Only YouTube URLs are supported.")
 
@@ -79,73 +137,80 @@ async def audit_video(request: AuditRequest):
         "video_url": request.video_url,
         "video_id": video_id_short,
         "compliance_results": [],
-        "errors": []
+        "errors": [],
     }
 
     try:
-        # ainvoke = async, non-blocking — lets FastAPI handle other requests
-        # while the pipeline is running (download + VI processing can take minutes)
         final_state = await compliance_graph.ainvoke(initial_inputs)
+        ai_status = final_state.get("final_status", "UNKNOWN")
+        compliance_results = final_state.get("compliance_results", [])
+        ingestion_source = final_state.get("ingestion_source")
+
+        policy_version = get_current_policy_version(db)
+        policy_version_id = policy_version.id if policy_version else None
+
+        audit_id = None
+        try:
+            audit = save_audit(
+                db,
+                team_id=user.team_id,
+                user_id=user.user_id,
+                session_id=session_id,
+                video_url=request.video_url,
+                video_id=final_state.get("video_id", video_id_short),
+                ai_status=ai_status,
+                final_report=final_state.get("final_report", "No report generated."),
+                compliance_results=compliance_results,
+                policy_version_id=policy_version_id,
+                ingestion_source=ingestion_source,
+                raw_response={
+                    "compliance_results": compliance_results,
+                    "final_status": ai_status,
+                    "final_report": final_state.get("final_report"),
+                    "ingestion_source": ingestion_source,
+                },
+            )
+            audit_id = str(audit.id)
+        except Exception as db_exc:
+            logger.warning("Audit persistence skipped (database unavailable): %s", db_exc)
 
         return AuditResponse(
+            audit_id=audit_id,
             session_id=session_id,
-            video_id=final_state.get("video_id", video_id_short),
-            status=final_state.get("final_status", "UNKNOWN"),
-            final_report=final_state.get("final_report", "No report generated."),
-            compliance_results=final_state.get("compliance_results", [])
+            video_id=audit.video_id,
+            status=audit.final_status,
+            final_status=audit.final_status,
+            ai_status=audit.ai_status,
+            final_report=audit.final_report,
+            ingestion_source=audit.ingestion_source,
+            compliance_results=compliance_results,
         )
 
-    except Exception as e:
-        logger.error(f"Audit failed — session={session_id}  error={str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Workflow execution failed: {str(e)}"
-        )
+    except Exception as exc:
+        logger.error("Audit failed session=%s error=%s", session_id, exc)
+        raise HTTPException(status_code=500, detail=f"Workflow execution failed: {exc}") from exc
 
 
 @app.get("/health")
 def health_check():
-    """Quick liveness probe — used by load balancers and monitoring."""
-    return {"status": "healthy", "service": "Brand Guardian AI"}
-
-@app.get("/debug/env")
-def debug_env():
-    """Temporary endpoint to verify env vars are loaded."""
-    return {
-        "AZURE_VI_ACCOUNT_ID":      os.getenv("AZURE_VI_ACCOUNT_ID", "MISSING"),
-        "AZURE_VI_LOCATION":        os.getenv("AZURE_VI_LOCATION", "MISSING"),
-        "AZURE_VI_NAME":            os.getenv("AZURE_VI_NAME", "MISSING"),
-        "AZURE_SUBSCRIPTION_ID":    os.getenv("AZURE_SUBSCRIPTION_ID", "MISSING"),
-        "AZURE_RESOURCE_GROUP":     os.getenv("AZURE_RESOURCE_GROUP", "MISSING"),
-        "AZURE_OPENAI_ENDPOINT":    os.getenv("AZURE_OPENAI_ENDPOINT", "MISSING"),
-        "AZURE_SEARCH_ENDPOINT":    os.getenv("AZURE_SEARCH_ENDPOINT", "MISSING"),
-        "YOUTUBE_API_KEY":          os.getenv("YOUTUBE_API_KEY", "MISSING"),
-    }
+    return {"status": "healthy", "service": "Brand Guardian AI", "version": "3.0.0"}
 
 
-@app.get("/debug/vi-test")
-async def vi_test():
-    """Tests Video Indexer connection directly."""
-    from backend.src.services.video_indexer import VideoIndexerService
-    try:
-        vi = VideoIndexerService()
-        arm_token = vi.get_access_token()
-        vi_token = vi.get_account_token(arm_token)
-        return {
-            "arm_token": "OK",
-            "vi_token": "OK" if vi_token else "EMPTY",
-            "account_id": vi.account_id,
-            "location": vi.location,
-        }
-    except Exception as e:
-        return {"error": str(e)}
-# ── Run instructions ─────────────────────────────────────────────────────────
-# uv run uvicorn backend.src.api.server:app --reload --host 0.0.0.0 --port 8000
+@app.get("/auth/me", response_model=AuthMeResponse)
+def auth_me(user: UserContext = Depends(get_current_user)):
+    return AuthMeResponse(
+        user_id=str(user.user_id),
+        team_id=str(user.team_id),
+        email=user.email,
+        role=user.role.value,
+    )
 
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
-# Serve the frontend
 @app.get("/")
 def serve_frontend():
     return FileResponse("index.html")
+
+
+@app.get("/admin")
+def serve_admin():
+    return FileResponse("admin.html")

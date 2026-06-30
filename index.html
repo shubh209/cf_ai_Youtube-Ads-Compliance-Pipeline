@@ -604,6 +604,7 @@
     </div>
   </div>
   <div class="header-right">
+    <a href="/admin" style="color:var(--muted);font-size:.75rem;margin-right:1rem;text-decoration:none">Admin</a>
     <div class="status-pill">
       <span class="status-dot"></span>
       LangGraph · Azure AI
@@ -616,10 +617,13 @@
 
   <!-- HERO -->
   <div class="hero">
-    <div class="hero-badge">🔍 Powered by Azure Video Indexer + GPT-4o</div>
+    <div class="hero-badge">🔍 YouTube Data API · Captions · RAG · GPT-4o</div>
     <h1>Audit YouTube Ads for<br/><em>Policy Compliance</em></h1>
     <p class="hero-sub">
-      Paste any YouTube ad URL. The pipeline downloads it, extracts transcript &amp; on-screen text via Azure Video Indexer, retrieves relevant compliance rules, and generates a detailed violation report.
+      Paste any YouTube ad URL. The pipeline pulls video metadata and captions (with Video Indexer fallback), retrieves indexed YouTube and FTC policy rules, and returns a severity ranked pass or fail report with policy citations.
+    </p>
+    <p class="hero-sub" style="font-size:.75rem;color:var(--warn);margin-top:.5rem">
+      Decision support only — not legal advice. A qualified reviewer must confirm findings before publishing ads.
     </p>
   </div>
 
@@ -642,34 +646,19 @@
 
   <!-- PIPELINE STRIP -->
   <div class="pipeline-strip">
-    <div class="pipe-node" id="pn-fetch">
-      <div class="pipe-dot">⬇</div>
-      <span class="pipe-label">Download</span>
+    <div class="pipe-node" id="pn-metadata">
+      <div class="pipe-dot">📋</div>
+      <span class="pipe-label">Metadata</span>
     </div>
     <div class="pipe-arrow">──▶</div>
-    <div class="pipe-node" id="pn-blob">
-      <div class="pipe-dot">🗄</div>
-      <span class="pipe-label">Blob Storage</span>
-    </div>
-    <div class="pipe-arrow">──▶</div>
-    <div class="pipe-node" id="pn-indexer">
-      <div class="pipe-dot">🎬</div>
-      <span class="pipe-label">Video Indexer</span>
-    </div>
-    <div class="pipe-arrow">──▶</div>
-    <div class="pipe-node" id="pn-ocr">
-      <div class="pipe-dot">👁</div>
-      <span class="pipe-label">OCR + Transcript</span>
+    <div class="pipe-node" id="pn-enrich">
+      <div class="pipe-dot">🎙</div>
+      <span class="pipe-label">Captions / VI</span>
     </div>
     <div class="pipe-arrow">──▶</div>
     <div class="pipe-node" id="pn-retrieval">
       <div class="pipe-dot">🔍</div>
-      <span class="pipe-label">Rules Retrieval</span>
-    </div>
-    <div class="pipe-arrow">──▶</div>
-    <div class="pipe-node" id="pn-audit">
-      <div class="pipe-dot">🤖</div>
-      <span class="pipe-label">AI Auditor</span>
+      <span class="pipe-label">Rules (RAG)</span>
     </div>
     <div class="pipe-arrow">──▶</div>
     <div class="pipe-node" id="pn-report">
@@ -800,26 +789,26 @@
 <script>
 // ── CONFIG ──────────────────────────────────────────────────────────────────
 // Change this if your backend runs on a different host/port
-const API_BASE = 'https://brand-guardian-api.wonderfulbay-f06178ea.eastus.azurecontainerapps.io';
+const API_BASE = window.location.origin;
 
-// ── PIPELINE NODES (in order) ────────────────────────────────────────────────
-const PIPE_NODES = ['pn-fetch','pn-blob','pn-indexer','pn-ocr','pn-retrieval','pn-audit','pn-report'];
+const PIPE_NODES = ['pn-metadata','pn-enrich','pn-retrieval','pn-report'];
 
-// Staged log messages tied to real pipeline phases.
-// These fire on timers to give live feedback while the API call is in-flight
-// (Azure Video Indexer takes 1-3 min, so we keep the user informed).
 const PIPELINE_LOGS = [
-  { delay: 500,   cls: 'log-info', msg: '▶ Sending request to Brand Guardian API…',      pipe: 0 },
-  { delay: 1500,  cls: 'log-ok',   msg: '✓ Request accepted — downloading video…',        pipe: 1 },
-  { delay: 8000,  cls: 'log-ok',   msg: '✓ Video downloaded — uploading to Azure…',       pipe: 2 },
-  { delay: 15000, cls: 'log-info', msg: '⏳ Submitted to Azure Video Indexer — processing…', pipe: 3 },
-  { delay: 60000, cls: 'log-ok',   msg: '✓ Video indexed — running OCR + transcript…',    pipe: 4 },
-  { delay: 90000, cls: 'log-info', msg: '🔍 Retrieving compliance rules from AI Search…', pipe: 5 },
-  { delay: 100000,cls: 'log-info', msg: '🤖 GPT-4o Auditor reasoning over content…',      pipe: 6 },
+  { delay: 500,   cls: 'log-info', msg: '▶ Sending request to Brand Guardian API…', pipe: 0 },
+  { delay: 1500,  cls: 'log-ok',   msg: '✓ Fetching YouTube metadata…',               pipe: 1 },
+  { delay: 4000,  cls: 'log-info', msg: '⏳ Enriching with captions or Video Indexer…', pipe: 2 },
+  { delay: 8000,  cls: 'log-info', msg: '🔍 Retrieving policy rules from AI Search…', pipe: 3 },
 ];
 
 let running = false;
 let pipeTimers = [];
+
+function authHeaders() {
+  const token = localStorage.getItem('access_token') || '';
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 function setUrl(u) {
@@ -907,7 +896,7 @@ async function startAudit() {
 
     const res = await fetch(`${API_BASE}/audit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ video_url: url }),
     });
 
@@ -987,6 +976,7 @@ function showResults(data) {
         <div class="v-content">
           <div class="v-category">${v.category}</div>
           <div class="v-desc">${v.description}</div>
+          ${v.citation_excerpt ? `<div class="v-desc" style="margin-top:.4rem;color:var(--muted);font-size:.7rem">Citation (${v.citation_source || 'policy'}): ${v.citation_excerpt.slice(0,200)}</div>` : ''}
         </div>`;
       list.appendChild(item);
     });

@@ -118,6 +118,41 @@ python main.py
 
 ---
 
+## Internal Tool Setup (Sprint 1)
+
+### Database migrations
+
+```bash
+cp env.example .env
+# Set DATABASE_URL to your Azure PostgreSQL connection string
+.venv/bin/python -m alembic upgrade head
+```
+
+### Microsoft Entra ID
+
+1. Register an app in Entra ID (single tenant for internal pilot).
+2. Add app roles: `Admin`, `Reviewer`, `ReadOnly`.
+3. Expose an API scope and set `ENTRA_CLIENT_ID`, `ENTRA_TENANT_ID`, and optional `ENTRA_API_AUDIENCE`.
+4. Assign users to roles in the Enterprise applications blade.
+
+For local development only:
+
+```env
+AUTH_DISABLED=true
+```
+
+Never set `AUTH_DISABLED=true` in production.
+
+### Security
+
+- `ALLOWED_ORIGINS` — comma separated list of frontend URLs (no wildcard in production).
+- `RATE_LIMIT_PER_MINUTE` — default 30 POST `/audit` requests per IP per minute.
+- Debug routes `/debug/env` and `/debug/vi-test` were removed.
+
+See **[docs/SETUP_TESTING.md](docs/SETUP_TESTING.md)** for Postgres, Entra, migrations, and smoke tests.
+
+---
+
 ## Environment Variables
 
 Create a `.env` file in the project root with the following variables:
