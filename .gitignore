@@ -55,3 +55,6 @@ logs/
 .coverage
 htmlcov/cookies.txt
 cookies.txt
+
+skills-main/
+.commitshow/
