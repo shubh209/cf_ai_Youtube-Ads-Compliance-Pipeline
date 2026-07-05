@@ -22,6 +22,9 @@ class VideoAuditState(TypedDict, total=False):
     ocr_text: List[str]
     ingestion_source: Optional[str]
     policy_version_id: Optional[str]
+    platforms: List[str]
+    audit_mode: str
+    processing_status: str
     compliance_results: Annotated[List[ComplianceIssue], operator.add]
     final_status: str
     final_report: str
