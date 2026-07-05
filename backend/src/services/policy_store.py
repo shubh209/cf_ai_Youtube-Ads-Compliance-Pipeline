@@ -1,6 +1,8 @@
+import logging
 import os
+import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.vectorstores import AzureSearch
@@ -9,9 +11,14 @@ from sqlalchemy.orm import Session
 from backend.src.db.models import PolicyVersion
 from backend.src.db.repository import get_current_policy_version
 
+logger = logging.getLogger("brand-guardian")
+
 # ponytail: module-level singleton. Not safe across forked processes.
 # Upgrade: use a connection pool if multi-process workers are added.
 _store: AzureSearch | None = None
+_store_lock = threading.Lock()
+
+_ALLOWED_PLATFORMS = {"youtube", "tiktok", "facebook", "generic"}
 
 
 @dataclass
@@ -49,7 +56,9 @@ def _build_store() -> AzureSearch:
 def get_vector_store() -> AzureSearch:
     global _store
     if _store is None:
-        _store = _build_store()
+        with _store_lock:
+            if _store is None:
+                _store = _build_store()
     return _store
 
 
@@ -66,6 +75,10 @@ def search_policy_chunks(
     k: int | None = None,
     platform: str | None = None,
 ) -> list[RetrievedChunk]:
+    # Allowlist platform to prevent OData filter injection
+    if platform and platform not in _ALLOWED_PLATFORMS:
+        raise ValueError(f"Unknown platform: {platform!r}. Allowed: {_ALLOWED_PLATFORMS}")
+
     store = get_vector_store()
     top_k = k or rag_top_k()
     min_score = rag_min_score()
@@ -97,6 +110,13 @@ def search_policy_chunks(
                 platform=meta.get("platform"),
             )
         )
+
+    if not chunks and results:
+        logger.warning(
+            "All %d chunks filtered by RAG_MIN_SCORE=%.2f for query: %.80s",
+            len(results), min_score, query_text,
+        )
+
     return chunks
 
 

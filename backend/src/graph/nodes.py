@@ -164,11 +164,17 @@ Do not include markdown fences or text outside the JSON.""".strip()
         f"EXTRACTED CLAIMS:\n{json.dumps(claims, indent=2)}"
     )
 
-    response = _llm(temperature=0.1).invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_message),
-    ])
-    return _parse_json(response.content)
+    try:
+        response = _llm(temperature=0.1).invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        return _parse_json(response.content)
+    except json.JSONDecodeError as exc:
+        logger.error("Policy reasoning returned malformed JSON: %s", exc)
+        return {"compliance_results": [], "status": "FAIL", "final_report": "Malformed LLM response."}
+    except Exception:
+        raise
 
 
 # ── Stage 4: Report synthesis ─────────────────────────────────────────────────
@@ -271,6 +277,13 @@ def audit_content_node(state: VideoAuditState) -> Dict[str, Any]:
         logger.info("--- [Auditor] Stage 2: retrieval + rerank ---")
         chunks = _retrieve_for_claims(claims, platforms)
         logger.info("--- [Auditor] %d unique chunks after dedup ---", len(chunks))
+
+        if not chunks:
+            return {
+                "final_status": "PASS",
+                "final_report": "No matching policy rules found for the extracted claims.",
+                "compliance_results": [],
+            }
 
         # Stage 3: reason
         logger.info("--- [Auditor] Stage 3: policy reasoning ---")

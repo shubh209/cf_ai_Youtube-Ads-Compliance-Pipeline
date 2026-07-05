@@ -1,21 +1,23 @@
 import logging
 import os
+import threading
 
 from backend.src.services.policy_store import RetrievedChunk
 
 logger = logging.getLogger("brand-guardian")
 
-# ponytail: module-level model load (~350MB). Single instance, not thread-safe for
-# parallel batches. Upgrade: sentence-transformers server if parallelism needed.
 _model = None
+_model_lock = threading.Lock()
 
 
 def _get_model():
     global _model
     if _model is None:
-        from sentence_transformers import CrossEncoder
-        model_name = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-        _model = CrossEncoder(model_name)
+        with _model_lock:
+            if _model is None:
+                from sentence_transformers import CrossEncoder
+                model_name = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+                _model = CrossEncoder(model_name)
     return _model
 
 
@@ -33,4 +35,7 @@ def rerank(query: str, chunks: list[RetrievedChunk], top_n: int = 5) -> list[Ret
         return [c for _, c in ranked[:top_n]]
     except Exception as exc:
         logger.warning("Reranker failed, returning original order: %s", exc)
-        return chunks[:top_n]
+        result = chunks[:top_n]
+        for c in result:
+            c.score = 0.0  # ponytail: signal score invalid
+        return result
