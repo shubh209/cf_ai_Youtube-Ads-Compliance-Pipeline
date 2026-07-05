@@ -191,7 +191,8 @@ def _synthesize_report(violations: list[dict], status: str) -> str:
     try:
         response = _mini_llm().invoke([HumanMessage(content=prompt)])
         return response.content.strip()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Report synthesis failed: %s", exc)
         return f"{status}: {len(violations)} violation(s) detected."
 
 
@@ -203,10 +204,15 @@ def _attach_citations(results: list[dict], chunks: list) -> list[dict]:
     for item in results:
         row = dict(item)
         chunk_id = row.get("chunk_id")
-        if chunk_id and chunk_id in chunk_map:
-            chunk = chunk_map[chunk_id]
-            row.setdefault("citation_source", chunk.source)
-            row.setdefault("citation_excerpt", chunk.content[:500])
+        if chunk_id:
+            if chunk_id in chunk_map:
+                chunk = chunk_map[chunk_id]
+                row.setdefault("citation_source", chunk.source)
+                row.setdefault("citation_excerpt", chunk.content[:500])
+            else:
+                logger.warning("LLM cited non-existent chunk_id=%s — stripped", chunk_id)
+                row["chunk_id"] = None
+                row["citation_source"] = None
         enriched.append(row)
     return enriched
 
