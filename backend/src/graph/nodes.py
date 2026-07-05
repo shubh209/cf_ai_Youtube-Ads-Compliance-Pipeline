@@ -10,11 +10,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from backend.src.graph.state import VideoAuditState
 from backend.src.services.ingestion import HybridIngestionService
 from backend.src.services.policy_store import format_chunks_for_prompt, search_policy_chunks
+from backend.src.services.reranker import rerank
 from backend.src.services.video_indexer import YouTubeTranscriptService
 
 logger = logging.getLogger("brand-guardian")
 logging.basicConfig(level=logging.INFO)
-
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.monitor").setLevel(logging.WARNING)
 logging.getLogger("azure.identity").setLevel(logging.WARNING)
@@ -27,20 +27,196 @@ def _require_env(var_name: str) -> str:
     return value
 
 
+def _llm(temperature: float = 0.1) -> AzureChatOpenAI:
+    # ponytail: new instance per call — cheap models are fast enough.
+    # Upgrade to module singleton if latency becomes measurable.
+    return AzureChatOpenAI(
+        azure_deployment=_require_env("AZURE_OPENAI_CHAT_DEPLOYMENT"),
+        azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
+        api_key=_require_env("AZURE_OPENAI_API_KEY"),
+        openai_api_version=_require_env("AZURE_OPENAI_API_VERSION"),
+        temperature=temperature,
+    )
+
+
+def _mini_llm(temperature: float = 0.1) -> AzureChatOpenAI:
+    deployment = os.getenv("AZURE_OPENAI_MINI_DEPLOYMENT", "gpt-4o-mini")
+    return AzureChatOpenAI(
+        azure_deployment=deployment,
+        azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
+        api_key=_require_env("AZURE_OPENAI_API_KEY"),
+        openai_api_version=_require_env("AZURE_OPENAI_API_VERSION"),
+        temperature=temperature,
+    )
+
+
+def _parse_json(content: str) -> dict:
+    content = content.strip()
+    if "```" in content:
+        match = re.search(r"```(?:json)?\s*(.*?)```", content, re.DOTALL)
+        if match:
+            content = match.group(1).strip()
+    return json.loads(content)
+
+
+# ── Stage 1: Claim extraction ────────────────────────────────────────────────
+
+def _extract_claims(transcript: str, ocr_text: list[str]) -> list[dict]:
+    """Extract discrete checkable claims from transcript + OCR via gpt-4o-mini."""
+    prompt = (
+        "Extract every distinct checkable claim from the transcript and on-screen text below.\n"
+        "Return a JSON array of objects: [{\"claim\": str, \"type\": str, \"timestamp\": str|null}]\n"
+        "Types: health_claim, pricing_claim, disclosure, product_claim, general\n"
+        "Include disclosures (present or absent). Be exhaustive. No markdown fences.\n\n"
+        f"TRANSCRIPT:\n{transcript}\n\nON-SCREEN TEXT:\n{' | '.join(ocr_text)}"
+    )
+    try:
+        response = _mini_llm().invoke([HumanMessage(content=prompt)])
+        return _parse_json(response.content)
+    except Exception as exc:
+        logger.warning("Claim extraction failed, using full transcript: %s", exc)
+        return [{"claim": transcript[:500], "type": "general", "timestamp": None}]
+
+
+# ── Stage 2: Per-claim retrieval + rerank ────────────────────────────────────
+
+def _retrieve_for_claims(claims: list[dict], platforms: list[str]) -> list:
+    """Retrieve and rerank policy chunks per claim, deduplicated across claims."""
+    seen: set[str] = set()
+    all_chunks = []
+
+    # ponytail: sequential per-claim retrieval. Parallelise with asyncio.gather
+    # if retrieval latency becomes the bottleneck at higher claim counts.
+    for claim_obj in claims:
+        claim_text = claim_obj.get("claim", "")
+        if not claim_text:
+            continue
+        for platform in platforms:
+            chunks = search_policy_chunks(claim_text, platform=platform)
+            reranked = rerank(claim_text, chunks, top_n=5)
+            for chunk in reranked:
+                if chunk.chunk_id not in seen:
+                    seen.add(chunk.chunk_id)
+                    all_chunks.append(chunk)
+
+    return all_chunks
+
+
+# ── Stage 3: Policy reasoning ─────────────────────────────────────────────────
+
+def _reason_violations(
+    claims: list[dict],
+    chunks: list,
+    metadata: dict,
+    transcript: str,
+    ocr_text: list[str],
+    ingestion_source: str,
+    platforms: list[str],
+) -> dict:
+    """Check claims against retrieved rules via gpt-4o. Returns raw audit_data dict."""
+    retrieved_rules = format_chunks_for_prompt(chunks)
+    confidence_note = ""
+    if chunks:
+        top_score = max(c.score for c in chunks)
+        confidence_note = f"\nRetrieval confidence (top chunk): {top_score:.2f}"
+
+    system_prompt = f"""You are a Senior Brand Compliance Auditor.
+
+OFFICIAL REGULATORY RULES (CHUNK_ID | SOURCE | platform):
+{retrieved_rules}{confidence_note}
+
+TARGET PLATFORMS: {', '.join(platforms)}
+
+INSTRUCTIONS:
+1. For each claim listed below, check it against the rules above.
+2. Flag violations only when a specific rule supports it — cite the CHUNK_ID.
+3. Tag each violation with the platform it applies to.
+4. Return strictly valid JSON:
+
+{{
+    "compliance_results": [
+        {{
+            "category": str,
+            "severity": "CRITICAL|WARNING|INFO",
+            "description": str,
+            "chunk_id": str,
+            "citation_source": str,
+            "citation_excerpt": str,
+            "confidence": "high|medium|low",
+            "platform": str,
+            "timestamp": str|null
+        }}
+    ],
+    "status": "PASS|FAIL",
+    "final_report": str
+}}
+
+severity CRITICAL = must fix before publishing.
+If no violations: status=PASS, compliance_results=[].
+Do not include markdown fences or text outside the JSON.""".strip()
+
+    user_message = (
+        f"VIDEO TITLE: {metadata.get('title', 'Unknown')}\n"
+        f"METADATA: {metadata}\n"
+        f"TRANSCRIPT: {transcript}\n"
+        f"ON-SCREEN TEXT: {ocr_text}\n"
+        f"INGESTION SOURCE: {ingestion_source}\n\n"
+        f"EXTRACTED CLAIMS:\n{json.dumps(claims, indent=2)}"
+    )
+
+    response = _llm(temperature=0.1).invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_message),
+    ])
+    return _parse_json(response.content)
+
+
+# ── Stage 4: Report synthesis ─────────────────────────────────────────────────
+
+def _synthesize_report(violations: list[dict], status: str) -> str:
+    """Produce human-readable summary via gpt-4o-mini."""
+    if not violations:
+        return "No policy violations detected. The ad content passed all compliance checks."
+    prompt = (
+        f"Write a 2-3 sentence compliance summary for an ad reviewer.\n"
+        f"Status: {status}. Violations: {json.dumps(violations[:10])}\n"
+        "Be specific about the most critical issues. Plain text, no markdown."
+    )
+    try:
+        response = _mini_llm().invoke([HumanMessage(content=prompt)])
+        return response.content.strip()
+    except Exception:
+        return f"{status}: {len(violations)} violation(s) detected."
+
+
+# ── Citation attachment ───────────────────────────────────────────────────────
+
+def _attach_citations(results: list[dict], chunks: list) -> list[dict]:
+    chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
+    enriched = []
+    for item in results:
+        row = dict(item)
+        chunk_id = row.get("chunk_id")
+        if chunk_id and chunk_id in chunk_map:
+            chunk = chunk_map[chunk_id]
+            row.setdefault("citation_source", chunk.source)
+            row.setdefault("citation_excerpt", chunk.content[:500])
+        enriched.append(row)
+    return enriched
+
+
+# ── LangGraph nodes ───────────────────────────────────────────────────────────
+
 def index_video_node(state: VideoAuditState) -> Dict[str, Any]:
     video_url = state.get("video_url")
     logger.info("--- [Node: Indexer] Processing: %s ---", video_url)
-
     try:
         if not video_url:
             raise ValueError("No video_url provided in state.")
-
         yt_service = YouTubeTranscriptService()
         clean_data = yt_service.extract_data(video_url)
         clean_data["ingestion_source"] = "metadata"
-        logger.info("--- [Node: Indexer] Metadata extraction complete ---")
         return clean_data
-
     except Exception as exc:
         logger.error("Video Indexer Failed: %s", exc)
         return {
@@ -57,10 +233,8 @@ def enrich_content_node(state: VideoAuditState) -> Dict[str, Any]:
     video_url = state.get("video_url", "")
     base_transcript = state.get("transcript", "") or ""
     logger.info("--- [Node: Enrich] Hybrid ingestion for %s ---", video_url)
-
     if not video_url or not base_transcript:
         return {"ingestion_source": "none"}
-
     try:
         service = HybridIngestionService()
         enriched = service.enrich(video_url, base_transcript)
@@ -71,111 +245,53 @@ def enrich_content_node(state: VideoAuditState) -> Dict[str, Any]:
         return {"ingestion_source": "metadata"}
 
 
-def _attach_citations(results: list[dict], chunks: list) -> list[dict]:
-    chunk_map = {chunk.chunk_id: chunk for chunk in chunks}
-    enriched = []
-    for item in results:
-        row = dict(item)
-        chunk_id = row.get("chunk_id")
-        if chunk_id and chunk_id in chunk_map:
-            chunk = chunk_map[chunk_id]
-            row.setdefault("citation_source", chunk.source)
-            row.setdefault("citation_excerpt", chunk.content[:500])
-        enriched.append(row)
-    return enriched
-
-
 def audit_content_node(state: VideoAuditState) -> Dict[str, Any]:
-    logger.info("--- [Node: Auditor] querying Knowledge Base and LLM ---")
+    logger.info("--- [Node: Auditor] 4-stage pipeline ---")
 
     transcript = state.get("transcript", "")
     if not transcript:
         return {
             "final_status": "FAIL",
-            "final_report": "Audit skipped because video processing failed (no content).",
+            "final_report": "Audit skipped: no content extracted from video.",
             "compliance_results": [],
         }
 
+    ocr_text = state.get("ocr_text", [])
+    metadata = state.get("video_metadata", {})
+    ingestion_source = state.get("ingestion_source", "unknown")
+    platforms = state.get("platforms") or ["youtube"]
+
     try:
-        llm = AzureChatOpenAI(
-            azure_deployment=_require_env("AZURE_OPENAI_CHAT_DEPLOYMENT"),
-            azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
-            api_key=_require_env("AZURE_OPENAI_API_KEY"),
-            openai_api_version=_require_env("AZURE_OPENAI_API_VERSION"),
-            temperature=0.0,
+        # Stage 1: extract claims
+        logger.info("--- [Auditor] Stage 1: claim extraction ---")
+        claims = _extract_claims(transcript, ocr_text)
+        logger.info("--- [Auditor] Extracted %d claims ---", len(claims))
+
+        # Stage 2: retrieve + rerank
+        logger.info("--- [Auditor] Stage 2: retrieval + rerank ---")
+        chunks = _retrieve_for_claims(claims, platforms)
+        logger.info("--- [Auditor] %d unique chunks after dedup ---", len(chunks))
+
+        # Stage 3: reason
+        logger.info("--- [Auditor] Stage 3: policy reasoning ---")
+        audit_data = _reason_violations(
+            claims, chunks, metadata, transcript, ocr_text, ingestion_source, platforms
         )
 
-        ocr_text = state.get("ocr_text", [])
-        query_text = f"{transcript} {' '.join(ocr_text)}".strip()
-        chunks = search_policy_chunks(query_text)
-        retrieved_rules = format_chunks_for_prompt(chunks)
+        violations = _attach_citations(audit_data.get("compliance_results", []), chunks)
+        status = audit_data.get("status", "FAIL")
 
-        metadata = state.get("video_metadata", {})
-        video_title = metadata.get("title", "Unknown")
-
-        system_prompt = f"""
-You are a Senior Brand Compliance Auditor specializing in YouTube advertising policy.
-
-OFFICIAL REGULATORY RULES (each block includes CHUNK_ID and SOURCE):
-{retrieved_rules}
-
-INSTRUCTIONS:
-1. Analyze the video transcript, description, and metadata below.
-2. Identify ANY violations of YouTube Ad Policies or FTC guidelines.
-3. For each violation you MUST set chunk_id to the CHUNK_ID of the rule you relied on.
-4. Return strictly valid JSON in the following format:
-
-{{
-    "compliance_results": [
-        {{
-            "category": "Claim Validation",
-            "severity": "CRITICAL",
-            "description": "Explanation of the violation...",
-            "chunk_id": "uuid-from-CHUNK_ID",
-            "citation_source": "filename.pdf",
-            "citation_excerpt": "quoted rule text...",
-            "confidence": "high"
-        }}
-    ],
-    "status": "FAIL",
-    "final_report": "Summary of findings..."
-}}
-
-Severity levels: CRITICAL, WARNING, INFO.
-If no violations are found, set "status" to "PASS" and "compliance_results" to [].
-Do not include markdown fences or any text outside the JSON.
-""".strip()
-
-        user_message = f"""
-VIDEO TITLE: {video_title}
-VIDEO METADATA: {metadata}
-TRANSCRIPT: {transcript}
-ON-SCREEN TEXT: {ocr_text}
-INGESTION SOURCE: {state.get("ingestion_source", "unknown")}
-""".strip()
-
-        response = llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ])
-
-        content = response.content.strip()
-        if "```" in content:
-            match = re.search(r"```(?:json)?\s*(.*?)```", content, re.DOTALL)
-            if match:
-                content = match.group(1).strip()
-
-        audit_data = json.loads(content)
-        results = _attach_citations(audit_data.get("compliance_results", []), chunks)
+        # Stage 4: synthesize report
+        final_report = _synthesize_report(violations, status)
 
         return {
-            "compliance_results": results,
-            "final_status": audit_data.get("status", "FAIL"),
-            "final_report": audit_data.get("final_report", "No report generated."),
+            "compliance_results": violations,
+            "final_status": status,
+            "final_report": final_report,
         }
 
     except Exception as exc:
-        logger.error("System Error in Auditor Node: %s", exc)
+        logger.error("Auditor node failed: %s", exc)
         return {
             "errors": [str(exc)],
             "final_status": "FAIL",

@@ -27,6 +27,7 @@ def run_policy_index(db: Session | None = None) -> dict:
         for split in splits:
             split.metadata["chunk_id"] = str(uuid.uuid4())
             split.metadata["source"] = os.path.basename(pdf_path)
+            split.metadata["platform"] = "youtube"  # default for existing PDFs
         all_splits.extend(splits)
 
     store = get_vector_store()

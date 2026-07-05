@@ -34,6 +34,9 @@ dependencies = [
     "pyjwt[crypto]>=2.10.0",
     "httpx>=0.28.0",
     "pytest>=8.3.0",
+    "headroom-ai[langchain]>=0.5.23",
+    "trafilatura>=2.0.0",
+ "sentence-transformers>=3.0.0",
 ]
 
 [tool.pytest.ini_options]
