@@ -89,6 +89,11 @@ def get_audit_for_team(db: Session, audit_id: uuid.UUID, team_id: uuid.UUID) -> 
     )
 
 
+def update_processing_status(db: Session, audit_id: str, status: str) -> None:
+    db.query(Audit).filter(Audit.session_id == audit_id).update({"processing_status": status})
+    db.commit()
+
+
 def apply_review_decision(
     db: Session,
     *,

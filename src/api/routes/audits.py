@@ -38,6 +38,9 @@ class AuditDetailResponse(BaseModel):
     final_report: str
     ingestion_source: str | None
     policy_version_id: str | None
+    processing_status: str | None = None
+    audit_mode: str | None = None
+    platforms: str | None = None
     created_at: datetime
     violations: list[ViolationResponse]
     reviews: list[ReviewResponse]
@@ -95,6 +98,9 @@ def get_audit(
         final_report=audit.final_report,
         ingestion_source=audit.ingestion_source,
         policy_version_id=str(audit.policy_version_id) if audit.policy_version_id else None,
+        processing_status=audit.processing_status,
+        audit_mode=audit.audit_mode,
+        platforms=audit.platforms,
         created_at=audit.created_at,
         violations=[
             ViolationResponse(

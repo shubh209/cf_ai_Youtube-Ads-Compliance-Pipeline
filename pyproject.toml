@@ -37,6 +37,7 @@ dependencies = [
     "headroom-ai[langchain]>=0.5.23",
     "trafilatura>=2.0.0",
  "sentence-transformers>=3.0.0",
+    "python-multipart>=0.0.9",
 ]
 
 [tool.pytest.ini_options]

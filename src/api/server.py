@@ -1,17 +1,20 @@
 import logging
 import os
+import subprocess
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from src.api.routes.admin import router as admin_router
@@ -189,6 +192,104 @@ async def audit_video(
     except Exception as exc:
         logger.error("Audit failed session=%s error=%s", session_id, exc)
         raise HTTPException(status_code=500, detail=f"Workflow execution failed: {exc}") from exc
+
+
+_ALLOWED_UPLOAD_PLATFORMS = {"youtube", "tiktok", "facebook"}
+_MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
+_MAX_DURATION_SECONDS = 60
+
+
+@app.post("/audit/upload", status_code=202)
+async def upload_video_for_audit(
+    file: UploadFile = File(...),
+    platforms: list[str] = Form(default=["youtube"]),
+    email: str | None = Form(default=None),
+    user: UserContext = Depends(require_audit_submitter),
+    db: Session = Depends(get_db),
+):
+    invalid = set(platforms) - _ALLOWED_UPLOAD_PLATFORMS
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Invalid platforms: {invalid}")
+
+    content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 500 MB limit")
+
+    ext = Path(file.filename or "video.mp4").suffix or ".mp4"
+    audit_id = str(uuid.uuid4())
+
+    # Validate duration via ffprobe
+    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    try:
+        tmp.write(content)
+        tmp.close()
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", tmp.name],
+            capture_output=True, text=True,
+        )
+        try:
+            duration = float(result.stdout.strip())
+        except ValueError:
+            duration = 0.0
+        if duration > _MAX_DURATION_SECONDS:
+            raise HTTPException(status_code=422, detail=f"Video exceeds {_MAX_DURATION_SECONDS}s limit")
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+    # Upload to Azure Blob
+    blob_url = ""
+    try:
+        from azure.storage.blob import BlobClient
+        conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+        container = os.getenv("AZURE_STORAGE_CONTAINER", "uploads")
+        blob_name = f"uploads/{audit_id}{ext}"
+        if conn_str:
+            blob = BlobClient.from_connection_string(conn_str, container, blob_name)
+            blob.upload_blob(content, overwrite=True)
+            blob_url = blob.url
+    except Exception as exc:
+        logger.warning("Blob upload failed for audit %s: %s", audit_id, exc)
+
+    # Enqueue job
+    try:
+        from azure.storage.queue import QueueClient
+        import json as _json
+        conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+        queue_name = os.getenv("AZURE_STORAGE_QUEUE_NAME", "audit-jobs")
+        if conn_str:
+            q = QueueClient.from_connection_string(conn_str, queue_name)
+            q.send_message(_json.dumps({
+                "audit_id": audit_id,
+                "blob_url": blob_url,
+                "platforms": platforms,
+                "email": email,
+            }))
+    except Exception as exc:
+        logger.warning("Queue enqueue failed for audit %s: %s", audit_id, exc)
+
+    # Persist audit row
+    try:
+        from src.db.models import Audit
+        audit = Audit(
+            team_id=user.team_id,
+            user_id=user.user_id,
+            session_id=audit_id,
+            video_url=blob_url or f"upload:{audit_id}",
+            video_id=f"vid_{audit_id[:8]}",
+            ai_status="PENDING",
+            final_status="PENDING",
+            final_report="",
+            processing_status="pending",
+            audit_mode="file",
+            platforms=",".join(platforms),
+        )
+        db.add(audit)
+        db.commit()
+    except Exception as exc:
+        logger.warning("Audit row persist failed for %s: %s", audit_id, exc)
+
+    return {"audit_id": audit_id, "status": "pending"}
 
 
 @app.get("/health")
