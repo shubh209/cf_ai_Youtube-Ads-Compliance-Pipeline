@@ -65,3 +65,44 @@ jobs:
             --name brand-guardian-api \
             --resource-group LLM-yt \
             --image ${{ env.IMAGE }}:${{ github.sha }}
+
+  build-and-deploy-worker:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/brand-guardian-worker:latest
+            ghcr.io/${{ github.repository_owner }}/brand-guardian-worker:${{ github.sha }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Worker Container App (if exists)
+        run: |
+          az containerapp update \
+            --name brand-guardian-worker \
+            --resource-group LLM-yt \
+            --image ghcr.io/${{ github.repository_owner }}/brand-guardian-worker:${{ github.sha }} \
+            2>/dev/null || echo "Worker container app not yet created — skipping update"
