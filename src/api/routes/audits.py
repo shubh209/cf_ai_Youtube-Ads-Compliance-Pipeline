@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from src.auth.dependencies import get_current_user
+from src.auth.dependencies import get_current_user, require_reviewer
 from src.auth.models import UserContext
 from src.db.repository import get_audit_for_team, list_audits_for_team
 from src.db.session import get_db
@@ -118,3 +118,26 @@ def get_audit(
             for r in audit.reviews
         ],
     )
+
+
+class EmailReportRequest(BaseModel):
+    email: str
+
+
+@router.post("/{audit_id}/email")
+def email_audit_report(
+    audit_id: uuid.UUID,
+    body: EmailReportRequest,
+    user: UserContext = Depends(require_reviewer),
+    db: Session = Depends(get_db),
+):
+    audit = get_audit_for_team(db, audit_id, user.team_id)
+    if audit is None:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    from src.services.export import export_audit_pdf
+    from src.services.email_service import send_audit_report
+
+    pdf_bytes = export_audit_pdf(db, audit_id, user.team_id)
+    send_audit_report(body.email, str(audit_id), pdf_bytes)
+    return {"status": "sent"}
