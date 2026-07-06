@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -64,11 +64,12 @@ def list_policy_versions(
 
 @router.post("/policies/reindex", response_model=ReindexResponse)
 def reindex_policies(
+    platforms: list[str] | None = Query(default=None),
     user: UserContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     try:
-        result = run_policy_index(db)
+        result = run_policy_index(db, platforms=platforms)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Reindex failed: {exc}") from exc
 
