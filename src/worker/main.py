@@ -63,6 +63,7 @@ def _process_message(db, message_body: dict) -> None:
     ocr_frames = []  # OCR on blob URL not supported inline; worker enqueues path separately
 
     update_processing_status(db, audit_id, "auditing")
+    logger.info("worker_audit_start audit_id=%s platforms=%s", audit_id, platforms)
     state = {
         "video_url": blob_url,
         "video_id": audit_id,

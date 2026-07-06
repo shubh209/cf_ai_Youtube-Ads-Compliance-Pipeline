@@ -39,6 +39,7 @@ dependencies = [
  "sentence-transformers>=3.0.0",
     "python-multipart>=0.0.9",
     "azure-communication-email>=1.0.0",
+    "langfuse>=2.0.0",
 ]
 
 [tool.pytest.ini_options]

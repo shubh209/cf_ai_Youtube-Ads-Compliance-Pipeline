@@ -32,6 +32,30 @@ from src.services.export import DISCLAIMER
 
 setup_telemetry()
 
+
+def _setup_langfuse():
+    """Set up Langfuse tracing if credentials are configured."""
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+    if not public_key or not secret_key:
+        logging.getLogger("api-server").info("Langfuse tracing disabled (LANGFUSE_PUBLIC_KEY/SECRET_KEY not set)")
+        return None
+    try:
+        from langfuse.callback import CallbackHandler
+        handler = CallbackHandler(
+            public_key=public_key,
+            secret_key=secret_key,
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+        )
+        logging.getLogger("api-server").info("Langfuse tracing enabled")
+        return handler
+    except Exception as exc:
+        logging.getLogger("api-server").warning("Langfuse setup failed: %s", exc)
+        return None
+
+
+langfuse_handler = _setup_langfuse()
+
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logging.getLogger("azure.monitor").setLevel(logging.WARNING)
@@ -180,7 +204,8 @@ async def audit_video(
     }
 
     try:
-        final_state = await compliance_graph.ainvoke(initial_inputs)
+        config = {"callbacks": [langfuse_handler]} if langfuse_handler else {}
+        final_state = await compliance_graph.ainvoke(initial_inputs, config=config)
         ai_status = final_state.get("final_status", "UNKNOWN")
         compliance_results = final_state.get("compliance_results", [])
         ingestion_source = final_state.get("ingestion_source")

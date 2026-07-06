@@ -278,11 +278,15 @@ def audit_content_node(state: VideoAuditState) -> Dict[str, Any]:
         logger.info("--- [Auditor] Stage 1: claim extraction ---")
         claims = _extract_claims(transcript, ocr_text)
         logger.info("--- [Auditor] Extracted %d claims ---", len(claims))
+        logger.info("claims_extracted=%d", len(claims))
 
         # Stage 2: retrieve + rerank
         logger.info("--- [Auditor] Stage 2: retrieval + rerank ---")
         chunks = _retrieve_for_claims(claims, platforms)
         logger.info("--- [Auditor] %d unique chunks after dedup ---", len(chunks))
+        logger.info("chunks_retrieved=%d retrieval_confidence_max=%.3f",
+            len(chunks),
+            max((c.score for c in chunks), default=0.0))
 
         if not chunks:
             return {
