@@ -84,6 +84,18 @@ app.include_router(export_router)
 
 class AuditRequest(BaseModel):
     video_url: str
+    platforms: list[str] = ["youtube"]
+
+    @field_validator("platforms")
+    @classmethod
+    def validate_platforms(cls, v: list[str]) -> list[str]:
+        allowed = {"youtube", "tiktok", "facebook"}
+        invalid = set(v) - allowed
+        if invalid:
+            raise ValueError(f"Invalid platforms: {invalid}")
+        if not v:
+            raise ValueError("At least one platform required")
+        return v
 
 
 class ComplianceIssue(BaseModel):
@@ -106,6 +118,7 @@ class AuditResponse(BaseModel):
     final_report: str
     ingestion_source: str | None = None
     compliance_results: List[ComplianceIssue]
+    violations_by_platform: dict[str, list[ComplianceIssue]] = {}
     disclaimer: str = DISCLAIMER
 
 
@@ -114,6 +127,15 @@ class AuthMeResponse(BaseModel):
     team_id: str
     email: str | None
     role: str
+
+
+def _group_by_platform(results: list) -> dict[str, list]:
+    """Group compliance results by their 'platform' field."""
+    grouped: dict[str, list] = {}
+    for item in results:
+        platform = item.get("platform", "unknown") if isinstance(item, dict) else getattr(item, "platform", "unknown") or "unknown"
+        grouped.setdefault(platform, []).append(item)
+    return grouped
 
 
 @app.post("/audit", response_model=AuditResponse)
@@ -133,12 +155,26 @@ async def audit_video(
         user.team_id,
     )
 
-    if "youtube.com" not in request.video_url and "youtu.be" not in request.video_url:
-        raise HTTPException(status_code=400, detail="Only YouTube URLs are supported.")
+    _PLATFORM_DOMAINS = {
+        "youtube": ("youtube.com", "youtu.be"),
+        "tiktok": ("tiktok.com",),
+        "facebook": ("facebook.com", "fb.watch"),
+    }
+
+    def _url_matches_platform(url: str, platform: str) -> bool:
+        return any(d in url for d in _PLATFORM_DOMAINS.get(platform, ()))
+
+    url = request.video_url
+    if not any(_url_matches_platform(url, p) for p in request.platforms):
+        raise HTTPException(
+            status_code=400,
+            detail=f"URL does not match any of the selected platforms: {request.platforms}",
+        )
 
     initial_inputs = {
         "video_url": request.video_url,
         "video_id": video_id_short,
+        "platforms": request.platforms,
         "compliance_results": [],
         "errors": [],
     }
@@ -187,6 +223,7 @@ async def audit_video(
             final_report=audit.final_report,
             ingestion_source=audit.ingestion_source,
             compliance_results=compliance_results,
+            violations_by_platform=_group_by_platform(compliance_results),
         )
 
     except Exception as exc:
