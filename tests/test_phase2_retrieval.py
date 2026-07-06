@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.src.services.policy_store import RetrievedChunk, rag_min_score, rag_top_k
-from backend.src.services.reranker import rerank
-from backend.src.graph.nodes import (
+from src.services.policy_store import RetrievedChunk, rag_min_score, rag_top_k
+from src.services.reranker import rerank
+from src.pipeline.nodes import (
     _attach_citations,
     _extract_claims,
     _synthesize_report,
@@ -53,8 +53,8 @@ def test_search_policy_chunks_filters_low_scores():
     low.metadata = {"chunk_id": "low-id", "source": "yt.pdf"}
     low.page_content = "noisy irrelevant text"
 
-    with patch("backend.src.services.policy_store._store") as mock_store, \
-         patch("backend.src.services.policy_store.get_vector_store") as mock_get:
+    with patch("src.services.policy_store._store") as mock_store, \
+         patch("src.services.policy_store.get_vector_store") as mock_get:
         mock_store_instance = MagicMock()
         mock_get.return_value = mock_store_instance
         mock_store_instance.similarity_search_with_score.return_value = [
@@ -62,9 +62,9 @@ def test_search_policy_chunks_filters_low_scores():
             (low, 0.30),
         ]
 
-        from backend.src.services.policy_store import search_policy_chunks
+        from src.services.policy_store import search_policy_chunks
         # reset singleton to force re-init through mock
-        import backend.src.services.policy_store as ps
+        import src.services.policy_store as ps
         ps._store = mock_store_instance
 
         chunks = search_policy_chunks("health claim", k=10)
@@ -84,7 +84,7 @@ def test_rerank_orders_by_score():
         RetrievedChunk(chunk_id="b", source="s", content="FTC health claim disclosure requirement"),
         RetrievedChunk(chunk_id="c", source="s", content="video thumbnail policy"),
     ]
-    with patch("backend.src.services.reranker._get_model") as mock_get:
+    with patch("src.services.reranker._get_model") as mock_get:
         mock_model = MagicMock()
         mock_model.predict.return_value = [0.2, 0.9, 0.1]
         mock_get.return_value = mock_model
@@ -98,7 +98,7 @@ def test_rerank_orders_by_score():
 
 def test_rerank_returns_top_n():
     chunks = [RetrievedChunk(chunk_id=str(i), source="s", content=f"rule {i}") for i in range(10)]
-    with patch("backend.src.services.reranker._get_model") as mock_get:
+    with patch("src.services.reranker._get_model") as mock_get:
         mock_model = MagicMock()
         mock_model.predict.return_value = list(range(10))
         mock_get.return_value = mock_model
@@ -112,7 +112,7 @@ def test_rerank_empty_input():
 
 def test_rerank_degrades_gracefully_on_model_error():
     chunks = [RetrievedChunk(chunk_id="x", source="s", content="rule")]
-    with patch("backend.src.services.reranker._get_model") as mock_get:
+    with patch("src.services.reranker._get_model") as mock_get:
         mock_get.side_effect = RuntimeError("model load failed")
         result = rerank("query", chunks, top_n=5)
     # Falls back to original order, doesn't raise
@@ -122,7 +122,7 @@ def test_rerank_degrades_gracefully_on_model_error():
 # ── 4-stage audit node helpers ────────────────────────────────────────────────
 
 def test_extract_claims_returns_list_on_valid_json():
-    with patch("backend.src.graph.nodes._mini_llm") as mock_llm_factory:
+    with patch("src.pipeline.nodes._mini_llm") as mock_llm_factory:
         mock_llm = MagicMock()
         mock_llm_factory.return_value = mock_llm
         mock_llm.invoke.return_value = MagicMock(
@@ -134,7 +134,7 @@ def test_extract_claims_returns_list_on_valid_json():
 
 
 def test_extract_claims_falls_back_on_bad_json():
-    with patch("backend.src.graph.nodes._mini_llm") as mock_llm_factory:
+    with patch("src.pipeline.nodes._mini_llm") as mock_llm_factory:
         mock_llm = MagicMock()
         mock_llm_factory.return_value = mock_llm
         mock_llm.invoke.return_value = MagicMock(content="not valid json {{{{")
@@ -151,7 +151,7 @@ def test_synthesize_report_no_violations():
 
 def test_synthesize_report_with_violations():
     violations = [{"category": "FTC Disclosure", "severity": "CRITICAL", "description": "No #ad tag found."}]
-    with patch("backend.src.graph.nodes._mini_llm") as mock_llm_factory:
+    with patch("src.pipeline.nodes._mini_llm") as mock_llm_factory:
         mock_llm = MagicMock()
         mock_llm_factory.return_value = mock_llm
         mock_llm.invoke.return_value = MagicMock(content="FAIL: Missing FTC disclosure.")

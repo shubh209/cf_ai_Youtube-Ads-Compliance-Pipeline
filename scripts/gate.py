@@ -195,7 +195,7 @@ def phase_2() -> list[bool]:
     results.append(gate("All tests pass", code == 0, out[:200] if code != 0 else ""))
 
     # Reranker self-check
-    code, out = run("uv run python -c \"from backend.src.services.reranker import rerank; print('reranker import ok')\" 2>&1")
+    code, out = run("uv run python -c \"from src.services.reranker import rerank; print('reranker import ok')\" 2>&1")
     results.append(gate("reranker imports without error", code == 0, out[:200]))
 
     return results

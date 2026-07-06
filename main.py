@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from backend.src.graph.workflow import app
+from src.pipeline.workflow import app
 
 logging.basicConfig(
     level=logging.INFO,

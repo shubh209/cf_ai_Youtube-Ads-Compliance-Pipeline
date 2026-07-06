@@ -4,10 +4,10 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.src.auth.dependencies import get_current_user
-from backend.src.auth.models import UserContext
-from backend.src.db.models import UserRole
-from backend.src.api.server import app
+from src.auth.dependencies import get_current_user
+from src.auth.models import UserContext
+from src.db.models import UserRole
+from src.api.server import app
 
 
 @pytest.fixture

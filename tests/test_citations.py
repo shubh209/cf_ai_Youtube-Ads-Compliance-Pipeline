@@ -1,5 +1,5 @@
-from backend.src.graph.nodes import _attach_citations
-from backend.src.services.policy_store import RetrievedChunk
+from src.pipeline.nodes import _attach_citations
+from src.services.policy_store import RetrievedChunk
 
 
 def test_attach_citations_fills_from_chunk_map():
