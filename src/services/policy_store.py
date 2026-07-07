@@ -67,7 +67,10 @@ def rag_top_k() -> int:
 
 
 def rag_min_score() -> float:
-    return float(os.getenv("RAG_MIN_SCORE", "0.45"))
+    # ponytail: Azure AI Search scores are BM25-based (typically 0.01-0.10),
+    # not cosine similarity (0-1). Default 0.0 = no filtering; reranker handles quality.
+    # Upgrade: tune this after measuring score distributions in Langfuse.
+    return float(os.getenv("RAG_MIN_SCORE", "0.0"))
 
 
 def search_policy_chunks(
