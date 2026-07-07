@@ -18,13 +18,17 @@ def _blob_client(source_id: str):
 
 
 def _fetch_via_firecrawl(url: str) -> str:
-    from firecrawl import FirecrawlApp
     api_key = os.getenv("FIRECRAWL_API_KEY", "")
     if not api_key:
         raise ValueError("FIRECRAWL_API_KEY not set")
-    app = FirecrawlApp(api_key=api_key)
-    result = app.scrape_url(url, params={"formats": ["markdown"]})
-    content = result.get("markdown") or result.get("content") or ""
+    try:
+        from firecrawl.v1.client import V1FirecrawlApp
+        app = V1FirecrawlApp(api_key=api_key)
+    except ImportError:
+        from firecrawl import FirecrawlApp
+        app = FirecrawlApp(api_key=api_key)
+    result = app.scrape_url(url, formats=["markdown"])
+    content = result.markdown if hasattr(result, "markdown") else (result.get("markdown") or result.get("content") or "")
     if not content:
         raise ValueError(f"Firecrawl returned empty content for {url}")
     return content
