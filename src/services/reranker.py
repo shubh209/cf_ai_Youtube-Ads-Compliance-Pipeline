@@ -22,7 +22,10 @@ def _get_model():
 
 
 def rerank(query: str, chunks: list[RetrievedChunk], top_n: int = 5) -> list[RetrievedChunk]:
-    """Re-rank chunks by cross-encoder relevance. Returns top_n."""
+    """Re-rank chunks by cross-encoder relevance. Returns top_n.
+    ponytail: falls back to score-sorted truncation if sentence-transformers not installed.
+    Ceiling: no semantic re-ranking without the model. Upgrade: install sentence-transformers.
+    """
     if not chunks:
         return chunks
     try:
@@ -34,8 +37,6 @@ def rerank(query: str, chunks: list[RetrievedChunk], top_n: int = 5) -> list[Ret
             chunk.score = float(score)
         return [c for _, c in ranked[:top_n]]
     except Exception as exc:
-        logger.warning("Reranker failed, returning original order: %s", exc)
-        result = chunks[:top_n]
-        for c in result:
-            c.score = 0.0  # ponytail: signal score invalid
+        logger.warning("Reranker unavailable (%s) — using vector score order", exc)
+        result = sorted(chunks, key=lambda c: -c.score)[:top_n]
         return result

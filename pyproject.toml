@@ -36,7 +36,6 @@ dependencies = [
     "pytest>=8.3.0",
     "headroom-ai[langchain]>=0.5.23",
     "trafilatura>=2.0.0",
- "sentence-transformers>=3.0.0",
     "python-multipart>=0.0.9",
     "azure-communication-email>=1.0.0",
     "langfuse>=2.0.0",
