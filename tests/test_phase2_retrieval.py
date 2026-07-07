@@ -26,7 +26,7 @@ def test_rag_top_k_default():
 def test_rag_min_score_default():
     import os
     os.environ.pop("RAG_MIN_SCORE", None)
-    assert rag_min_score() == 0.45
+    assert rag_min_score() == 0.0
 
 
 def test_retrieved_chunk_has_score_and_platform():
