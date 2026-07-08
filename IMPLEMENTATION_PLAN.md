@@ -616,3 +616,158 @@ Phases 2 and 3 touch different files and can be parallelised if needed.
 | 8 — Observability | 0.5 day |
 | 9 — CI/CD | 0.5 day |
 | **Total** | **~10.5 days** |
+
+---
+
+## Phase 10 — Policy Retrieval Overhaul
+**Goal: Fix zero-violation output caused by shallow policy content + wrong scoring assumption**
+
+### Root Causes Identified
+1. `POLICY_SOURCES` points to category index pages, not leaf rule pages — 5 URLs instead of ~50
+2. `RAG_MIN_SCORE=0.45` filtered all BM25 results (BM25 scores are 0.01-0.10, not 0-1 cosine)
+3. Vocabulary mismatch: claims say "boosts metabolism", policies say "unsubstantiated health claim"
+4. Raw markdown chunks instead of structured rule objects
+
+### Decisions Made
+- Keep Firecrawl, switch from `scrape` to `extract` with JSON schema
+- No Crawl4AI (no cost benefit at current volume)
+- No caching beyond content-hash diff on weekly reindex (already planned)
+- No Graph RAG until golden dataset exists
+- No binary embeddings / quantization (no scale justification)
+- No separate reranker service (vector score fallback is sufficient)
+- Add X/Twitter as 5th platform
+- Risk buckets (LOW/MEDIUM/HIGH/CRITICAL) replace raw PASS/FAIL per violation
+
+---
+
+### Subtask 10.1 — Curate leaf URL list
+**One thing:** Map real policy sub-pages for YouTube, Meta, TikTok, X, FTC using Firecrawl `map`.
+Output: updated `POLICY_SOURCES` with 40-50 leaf URLs. No code changes, just the list.
+
+- [ ] Run `firecrawl.map("https://support.google.com/adspolicy")` — filter URLs with: policy, prohibited, restricted, health, misleading, financial, disclosure
+- [ ] Same for Meta, TikTok, X ad policy domains
+- [ ] Curate final list, add to `src/services/policy_sources.py`
+
+**Gate:** At least 15 YouTube leaf URLs, 8 Meta, 5 TikTok, 5 X, FTC unchanged.
+
+---
+
+### Subtask 10.2 — Design and validate extraction schema
+**One thing:** Define JSON schema for structured rule extraction. Test against 3 real URLs.
+
+Schema:
+```python
+EXTRACTION_SCHEMA = {
+    "policy_name": "string",
+    "category": "health_claim|misleading|disclosure|financial|prohibited|restricted",
+    "platform": "youtube|meta|tiktok|facebook|x|generic",
+    "what_is_prohibited": ["string"],
+    "what_is_allowed": ["string"],
+    "enforcement_note": "string"
+}
+```
+
+- [ ] Test schema against YouTube health claims page, Meta ad standards page, FTC page
+- [ ] Verify `what_is_prohibited` list is non-empty and readable
+- [ ] No indexing yet — validation only
+
+**Gate:** 3 test extractions return non-empty `what_is_prohibited` lists.
+
+---
+
+### Subtask 10.3 — Update policy_fetcher.py
+**One thing:** Switch `_fetch_via_firecrawl` from `scrape_url` to `extract` with schema.
+
+- [ ] Replace `app.scrape_url(url, formats=["markdown"])` with `app.extract([url], schema=EXTRACTION_SCHEMA)`
+- [ ] Return serialized JSON string (will be chunked by `policy_indexing.py`)
+- [ ] Keep blob cache fallback unchanged — same interface
+
+**Files:** `src/services/policy_fetcher.py` only.
+
+---
+
+### Subtask 10.4 — Update policy_indexing.py
+**One thing:** Chunk structured JSON objects instead of raw markdown.
+
+- [ ] Parse extracted JSON into individual rule objects
+- [ ] Each `what_is_prohibited[i]` item becomes one chunk
+- [ ] Chunk metadata: `{chunk_id, source, platform, category, policy_name}`
+- [ ] Keep `RecursiveCharacterTextSplitter` as fallback if JSON parsing fails
+
+**Files:** `src/services/policy_indexing.py` only.
+
+---
+
+### Subtask 10.5 — Enable Azure AI Search hybrid semantic ranking
+**One thing:** Enable semantic ranker on the index + update search call.
+
+- [ ] Azure Portal: `brand-compliance-rules` index → Enable semantic search → create config named `"default"`
+- [ ] Update `search_policy_chunks` to pass `semantic_configuration_name="default"` and `query_type="semantic"`
+- [ ] Cost: ~$1/month for semantic ranker feature
+
+**Files:** `src/services/policy_store.py` only.
+
+---
+
+### Subtask 10.6 — Add query expansion
+**One thing:** Rewrite claim into policy-style language before retrieval.
+
+```python
+# In _retrieve_for_claims, before search_policy_chunks:
+def _expand_claim(claim: str) -> str:
+    """Rewrite consumer claim into policy terminology for better BM25 match."""
+    # ponytail: single mini LLM call, no caching — claims are unique per video
+    prompt = f"Rewrite this ad claim as regulatory policy language (e.g. 'boosts metabolism 40%' → 'unsubstantiated efficacy claim, quantified health benefit'): {claim}"
+    return _mini_llm().invoke([HumanMessage(content=prompt)]).content.strip()
+```
+
+**Files:** `src/pipeline/nodes.py` only.
+
+---
+
+### Subtask 10.7 — Re-index and test gate
+**One thing:** Run reindex with new sources + verify violations returned.
+
+- [ ] `POST /admin/policies/reindex` with new schema
+- [ ] Run 5 test audits against known supplement/health ads
+- [ ] **Gate:** At least one violation returned per supplement ad
+
+---
+
+### Subtask 10.8 — Risk bucket output
+**One thing:** Add `risk_level` to each violation.
+
+```python
+# Map severity + retrieval confidence → risk bucket
+def _risk_level(severity: str, confidence: float) -> str:
+    if severity == "CRITICAL": return "HIGH"
+    if severity == "WARNING" and confidence > 0.05: return "MEDIUM"
+    return "LOW"
+```
+
+- [ ] Add `risk_level` field to `ComplianceIssue` TypedDict + Pydantic model
+- [ ] Populate in `_attach_citations`
+- [ ] Frontend already renders severity — add risk badge next to it
+
+**Files:** `src/pipeline/state.py`, `src/api/server.py`, `frontend/index.html`.
+
+---
+
+### Execution Order
+
+```
+10.1 → 10.2  (design only, no code)
+              ↓
+    10.3 → 10.4 + 10.5 (parallel)
+              ↓
+           10.6
+              ↓
+           10.7 (gate — must pass)
+              ↓
+           10.8
+```
+
+### Gate runner
+```bash
+python3 scripts/gate.py 10  # add phase 10 checks to gate.py
+```

@@ -535,10 +535,68 @@ def phase_9() -> list[bool]:
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
+def phase_10() -> list[bool]:
+    section("Phase 10 — Policy Retrieval Overhaul")
+    results = []
+
+    sources = (ROOT / "src/services/policy_sources.py").read_text()
+
+    # Subtask 10.1: leaf URLs curated (>15 total entries)
+    import re
+    url_count = len(re.findall(r'"url":', sources))
+    results.append(gate(f"POLICY_SOURCES has ≥15 entries (found {url_count})", url_count >= 15,
+        "Add leaf-level policy URLs to policy_sources.py"))
+
+    # Platform coverage
+    for platform in ["youtube", "tiktok", "facebook", "x", "generic"]:
+        results.append(gate(f"POLICY_SOURCES covers platform: {platform}",
+            f'"platform": "{platform}"' in sources or f"'platform': '{platform}'" in sources,
+            f"Add {platform} entries to POLICY_SOURCES"))
+
+    # Subtask 10.2: extraction schema defined
+    fetcher = (ROOT / "src/services/policy_fetcher.py").read_text()
+    results.append(gate("policy_fetcher uses extract (not scrape_url for primary fetch)",
+        "extract" in fetcher,
+        "Switch policy_fetcher to use Firecrawl extract endpoint"))
+    results.append(gate("EXTRACTION_SCHEMA defined in policy_fetcher or policy_sources",
+        "EXTRACTION_SCHEMA" in fetcher or "EXTRACTION_SCHEMA" in sources or
+        "what_is_prohibited" in fetcher,
+        "Define EXTRACTION_SCHEMA with what_is_prohibited field"))
+
+    # Subtask 10.4: structured chunking
+    indexing = (ROOT / "src/services/policy_indexing.py").read_text()
+    results.append(gate("policy_indexing handles structured JSON chunks",
+        "what_is_prohibited" in indexing or "json" in indexing.lower(),
+        "Update policy_indexing.py to parse JSON rule objects"))
+
+    # Subtask 10.5: hybrid search
+    store = (ROOT / "src/services/policy_store.py").read_text()
+    results.append(gate("policy_store uses semantic/hybrid search",
+        "semantic" in store.lower() or "hybrid" in store.lower(),
+        "Enable semantic_configuration_name in search_policy_chunks"))
+
+    # Subtask 10.6: query expansion
+    nodes = (ROOT / "src/pipeline/nodes.py").read_text()
+    results.append(gate("nodes.py has query expansion (_expand_claim or similar)",
+        "_expand_claim" in nodes or "expand" in nodes.lower() or "policy language" in nodes.lower(),
+        "Add query expansion before retrieval in _retrieve_for_claims"))
+
+    # Subtask 10.8: risk_level field
+    state = (ROOT / "src/pipeline/state.py").read_text()
+    results.append(gate("ComplianceIssue has risk_level field",
+        "risk_level" in state,
+        "Add risk_level to ComplianceIssue TypedDict"))
+
+    # Tests
+    code, out = run("uv run pytest tests/ -q 2>&1")
+    results.append(gate("All tests pass", code == 0, out[:200] if code != 0 else ""))
+
+    return results
+
 PHASES = {
     0: phase_0, 1: phase_1, 2: phase_2, 3: phase_3,
     4: phase_4, 5: phase_5, 6: phase_6, 7: phase_7,
-    8: phase_8, 9: phase_9,
+    8: phase_8, 9: phase_9, 10: phase_10,
 }
 
 if __name__ == "__main__":
