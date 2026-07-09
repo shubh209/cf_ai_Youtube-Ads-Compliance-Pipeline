@@ -50,6 +50,24 @@ def _mini_llm(temperature: float = 0.1) -> AzureChatOpenAI:
     )
 
 
+def _expand_claim(claim: str) -> str:
+    """Rewrite consumer claim into policy terminology for better retrieval.
+    ponytail: single mini LLM call per claim. No caching — claims are unique per video.
+    """
+    prompt = (
+        "Rewrite this advertising claim as regulatory/policy terminology for compliance search. "
+        "Be concise, 1-2 phrases. Examples: "
+        "'burns fat 3x faster' → 'unsubstantiated weight loss efficacy claim'; "
+        "'only $29 today' → 'pricing claim urgency'; "
+        "'#ad shown at end' → 'FTC disclosure placement'.\n"
+        f"Claim: {claim}"
+    )
+    try:
+        return _mini_llm().invoke([HumanMessage(content=prompt)]).content.strip()
+    except Exception:
+        return claim  # fallback: use original claim
+
+
 def _parse_json(content: str) -> dict:
     content = content.strip()
     if "```" in content:
@@ -92,7 +110,8 @@ def _retrieve_for_claims(claims: list[dict], platforms: list[str]) -> list:
         if not claim_text:
             continue
         for platform in platforms:
-            chunks = search_policy_chunks(claim_text, platform=platform)
+            expanded = _expand_claim(claim_text)
+            chunks = search_policy_chunks(expanded, platform=platform)
             reranked = rerank(claim_text, chunks, top_n=5)
             for chunk in reranked:
                 if chunk.chunk_id not in seen:
@@ -128,10 +147,12 @@ OFFICIAL REGULATORY RULES (CHUNK_ID | SOURCE | platform):
 TARGET PLATFORMS: {', '.join(platforms)}
 
 INSTRUCTIONS:
-1. For each claim listed below, check it against the rules above.
-2. Flag violations only when a specific rule supports it — cite the CHUNK_ID.
-3. Tag each violation with the platform it applies to.
-4. Return strictly valid JSON:
+Think step by step before producing JSON:
+1. For each claim, identify the claim TYPE (health, pricing, disclosure, product, general).
+2. Find the most relevant rule from the policy chunks above.
+3. Determine if the claim violates that rule. Be specific about WHY.
+4. Only flag a violation if you can name the exact rule that prohibits it.
+5. After reasoning, produce the JSON output below. Do not include your reasoning in the JSON.
 
 {{
     "compliance_results": [
@@ -213,6 +234,10 @@ def _attach_citations(results: list[dict], chunks: list) -> list[dict]:
                 logger.warning("LLM cited non-existent chunk_id=%s — stripped", chunk_id)
                 row["chunk_id"] = None
                 row["citation_source"] = None
+        # Derive risk_level from severity + retrieval confidence
+        sev = row.get("severity", "INFO")
+        score = chunk_map[row.get("chunk_id", "")].score if row.get("chunk_id") in chunk_map else 0.0
+        row["risk_level"] = "HIGH" if sev == "CRITICAL" else "MEDIUM" if sev == "WARNING" and score > 0.02 else "LOW"
         enriched.append(row)
     return enriched
 

@@ -11,6 +11,7 @@ class ComplianceIssue(TypedDict, total=False):
     citation_excerpt: Optional[str]
     chunk_id: Optional[str]
     confidence: Optional[str]
+    risk_level: Optional[str]
 
 
 class VideoAuditState(TypedDict, total=False):

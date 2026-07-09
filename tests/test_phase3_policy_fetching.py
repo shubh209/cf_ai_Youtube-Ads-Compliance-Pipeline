@@ -81,7 +81,8 @@ def test_run_policy_index_accepts_platform_filter():
         run_policy_index(db=None, platforms=["youtube"])
 
     fetched_ids = [call.args[0]["id"] for call in mock_fetch.call_args_list]
-    assert all("youtube" in fid for fid in fetched_ids), (
+    fetched_platforms = [call.args[0]["platform"] for call in mock_fetch.call_args_list]
+    assert all(p == "youtube" for p in fetched_platforms), (
         f"Non-youtube sources were fetched: {fetched_ids}"
     )
     non_youtube = [s for s in POLICY_SOURCES if s["platform"] != "youtube"]

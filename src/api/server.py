@@ -130,6 +130,7 @@ class ComplianceIssue(BaseModel):
     citation_excerpt: str | None = None
     chunk_id: str | None = None
     confidence: str | None = None
+    risk_level: str | None = None
 
 
 class AuditResponse(BaseModel):

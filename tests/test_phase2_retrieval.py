@@ -57,6 +57,8 @@ def test_search_policy_chunks_filters_low_scores():
          patch("src.services.policy_store.get_vector_store") as mock_get:
         mock_store_instance = MagicMock()
         mock_get.return_value = mock_store_instance
+        # semantic_hybrid not configured; falls back to similarity
+        mock_store_instance.semantic_hybrid_search_with_score.side_effect = AttributeError("not configured")
         mock_store_instance.similarity_search_with_score.return_value = [
             (high, 0.95),
             (low, 0.30),

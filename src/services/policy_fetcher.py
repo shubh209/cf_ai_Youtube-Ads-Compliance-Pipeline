@@ -17,6 +17,18 @@ def _blob_client(source_id: str):
     return BlobClient.from_connection_string(conn_str, container, f"{source_id}.json")
 
 
+EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "policy_name": {"type": "string"},
+        "category": {"type": "string", "description": "health_claim|misleading|disclosure|financial|prohibited|restricted|editorial|copyright|general"},
+        "platform": {"type": "string"},
+        "what_is_prohibited": {"type": "array", "items": {"type": "string"}},
+        "what_is_allowed": {"type": "array", "items": {"type": "string"}},
+        "enforcement_note": {"type": "string"}
+    }
+}
+
 def _fetch_via_firecrawl(url: str) -> str:
     api_key = os.getenv("FIRECRAWL_API_KEY", "")
     if not api_key:
@@ -27,6 +39,18 @@ def _fetch_via_firecrawl(url: str) -> str:
     except ImportError:
         from firecrawl import FirecrawlApp
         app = FirecrawlApp(api_key=api_key)
+
+    # Try structured extract first; fall back to scrape if extract fails
+    try:
+        result = app.extract([url], schema=EXTRACTION_SCHEMA)
+        # result may be a list or a dict depending on firecrawl version
+        data = result[0] if isinstance(result, list) else result
+        if data and data.get("what_is_prohibited"):
+            return json.dumps(data)
+    except Exception as exc:
+        logger.warning("Firecrawl extract failed for %s: %s — falling back to scrape", url, exc)
+
+    # Fallback: plain scrape
     result = app.scrape_url(url, formats=["markdown"])
     content = result.markdown if hasattr(result, "markdown") else (result.get("markdown") or result.get("content") or "")
     if not content:

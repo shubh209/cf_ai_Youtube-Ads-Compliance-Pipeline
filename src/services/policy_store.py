@@ -18,7 +18,7 @@ logger = logging.getLogger("brand-guardian")
 _store: AzureSearch | None = None
 _store_lock = threading.Lock()
 
-_ALLOWED_PLATFORMS = {"youtube", "tiktok", "facebook", "generic"}
+_ALLOWED_PLATFORMS = {"youtube", "tiktok", "facebook", "generic", "x"}
 
 
 @dataclass
@@ -78,47 +78,47 @@ def search_policy_chunks(
     k: int | None = None,
     platform: str | None = None,
 ) -> list[RetrievedChunk]:
-    # Allowlist platform to prevent OData filter injection
     if platform and platform not in _ALLOWED_PLATFORMS:
         raise ValueError(f"Unknown platform: {platform!r}. Allowed: {_ALLOWED_PLATFORMS}")
 
     store = get_vector_store()
     top_k = k or rag_top_k()
-    min_score = rag_min_score()
 
     filters = None
     if platform:
         filters = f"platform eq '{platform}' or platform eq 'generic'"
 
+    # ponytail: try semantic hybrid search first; falls back if semantic ranker not configured
     try:
-        results = store.similarity_search_with_score(query_text, k=top_k, filters=filters)
+        results = store.semantic_hybrid_search_with_score(
+            query_text, k=top_k, filters=filters
+        )
     except Exception:
-        # ponytail: filters may fail if index lacks platform field (pre-reindex).
-        # Fall back to unfiltered search so audits keep working.
-        results = store.similarity_search_with_score(query_text, k=top_k)
+        try:
+            results = store.similarity_search_with_score(query_text, k=top_k, filters=filters)
+        except Exception:
+            results = store.similarity_search_with_score(query_text, k=top_k)
 
     chunks: list[RetrievedChunk] = []
     for doc, score in results:
-        if score < min_score:
-            continue
         meta = doc.metadata or {}
         chunk_id = str(meta.get("chunk_id") or meta.get("id") or uuid.uuid4())
-        chunks.append(
-            RetrievedChunk(
-                chunk_id=chunk_id,
-                source=str(meta.get("source", "unknown")),
-                content=doc.page_content,
-                score=float(score),
-                page=meta.get("page"),
-                platform=meta.get("platform"),
-            )
-        )
+        chunks.append(RetrievedChunk(
+            chunk_id=chunk_id,
+            source=str(meta.get("source", "unknown")),
+            content=doc.page_content,
+            score=float(score),
+            page=meta.get("page"),
+            platform=meta.get("platform"),
+        ))
+
+    # ponytail: apply min_score filter after collection (same as before hybrid upgrade)
+    min_score = rag_min_score()
+    if min_score > 0.0:
+        chunks = [c for c in chunks if c.score >= min_score]
 
     if not chunks and results:
-        logger.warning(
-            "All %d chunks filtered by RAG_MIN_SCORE=%.2f for query: %.80s",
-            len(results), min_score, query_text,
-        )
+        logger.warning("All %d chunks filtered for query: %.80s", len(results), query_text)
 
     return chunks
 

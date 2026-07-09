@@ -3,6 +3,7 @@ Policy indexing: fetch live policy pages, chunk, and upload to Azure AI Search.
 Falls back to local PDFs if all live fetches fail (offline/dev mode).
 """
 import glob
+import json as _json
 import logging
 import os
 import uuid
@@ -18,6 +19,29 @@ from src.services.policy_sources import POLICY_SOURCES
 from src.services.policy_store import get_vector_store
 
 logger = logging.getLogger("brand-guardian")
+
+
+def _content_to_documents(content: str, source_meta: dict) -> list:
+    """Convert fetched content (JSON or markdown) into Document chunks."""
+    docs = []
+    try:
+        data = _json.loads(content)
+        prohibited = data.get("what_is_prohibited", [])
+        allowed = data.get("what_is_allowed", [])
+        category = data.get("category", "general")
+        all_rules = prohibited + allowed
+        if all_rules:
+            for rule in all_rules:
+                if rule.strip():
+                    docs.append(Document(
+                        page_content=rule.strip(),
+                        metadata={**source_meta, "category": category, "rule_type": "prohibited" if rule in prohibited else "allowed"},
+                    ))
+            return docs
+    except (_json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    # Fallback: treat as markdown, return as single doc for splitter
+    return [Document(page_content=content, metadata=source_meta)]
 
 
 def _load_fallback_pdfs() -> list[Document]:
@@ -59,18 +83,23 @@ def run_policy_index(
     for source in sources:
         try:
             content = fetch_policy_source(source)
-            doc = Document(
-                page_content=content,
-                metadata={
-                    "source": source["name"],
-                    "source_id": source["id"],
-                    "platform": source["platform"],
-                    "url": source["url"],
-                },
-            )
-            splits = splitter.split_documents([doc])
-            for split in splits:
-                split.metadata["chunk_id"] = str(uuid.uuid4())
+            source_meta = {
+                "source": source["name"],
+                "source_id": source["id"],
+                "platform": source["platform"],
+                "url": source["url"],
+            }
+            base_docs = _content_to_documents(content, source_meta)
+            # JSON-derived docs are already rule-granular; only split markdown docs
+            splits = []
+            for doc in base_docs:
+                if len(doc.page_content) > 1100:
+                    doc_splits = splitter.split_documents([doc])
+                else:
+                    doc_splits = [doc]
+                for split in doc_splits:
+                    split.metadata["chunk_id"] = str(uuid.uuid4())
+                splits.extend(doc_splits)
             all_splits.extend(splits)
             logger.info("Indexed %s: %d chunks", source["id"], len(splits))
         except Exception as exc:
