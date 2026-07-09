@@ -40,17 +40,10 @@ def _fetch_via_firecrawl(url: str) -> str:
         from firecrawl import FirecrawlApp
         app = FirecrawlApp(api_key=api_key)
 
-    # Try structured extract first; fall back to scrape if extract fails
-    try:
-        result = app.extract([url], schema=EXTRACTION_SCHEMA)
-        # result may be a list or a dict depending on firecrawl version
-        data = result[0] if isinstance(result, list) else result
-        if data and data.get("what_is_prohibited"):
-            return json.dumps(data)
-    except Exception as exc:
-        logger.warning("Firecrawl extract failed for %s: %s — falling back to scrape", url, exc)
-
-    # Fallback: plain scrape
+    # ponytail: using scrape (not extract) — extract requires async polling
+    # which is too slow for 33 URLs at index time. Structured JSON parsing
+    # happens in policy_indexing._content_to_documents via LLM extraction.
+    # Upgrade: use extract when Firecrawl async polling is acceptable.
     result = app.scrape_url(url, formats=["markdown"])
     content = result.markdown if hasattr(result, "markdown") else (result.get("markdown") or result.get("content") or "")
     if not content:
