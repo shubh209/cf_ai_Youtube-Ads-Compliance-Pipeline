@@ -771,3 +771,54 @@ def _risk_level(severity: str, confidence: float) -> str:
 ```bash
 python3 scripts/gate.py 10  # add phase 10 checks to gate.py
 ```
+
+---
+
+## Future Scope
+
+### FS-1 — LLM Service Interface / Provider Abstraction
+
+Wrap all AI provider calls behind a clean interface so swapping models or providers requires changing one file.
+
+```
+App Core → LLMService Interface → AI Provider Wrapper → AI API
+```
+
+Trigger: when running two providers simultaneously (e.g. Groq for extraction, Azure for reasoning) or A/B testing models.
+
+---
+
+### FS-2 — Structured Policy Extraction (Subtask 10.9)
+
+After scraping, run a cheap GPT-4o-mini call to extract `what_is_prohibited` items as structured JSON before chunking. Produces atomic rule chunks with category tags. Cost: ~$0.001/page instead of 30 Firecrawl credits. Requires stable pipeline first.
+
+---
+
+### FS-3 — AI Evals, Observability & Monitoring
+
+- **Golden Datasets** — labeled examples of compliant/non-compliant ad claims with ground truth violations. Prerequisite for quantitative accuracy measurement.
+- **LLM-as-a-judge** — automated evaluation of violation detection quality using a separate LLM judge.
+- **Failure Analysis** — systematic review of false positives/negatives from production audits.
+- **Production eval loops** — continuous regression detection, hallucination catching, quality tracking before changes reach users.
+- **Observability platforms** — Langfuse (already wired), expand to cover retrieval quality metrics, latency breakdowns, cost per audit.
+
+---
+
+### FS-4 — AI Security & Safety
+
+- **Prompt injection guardrails** — video content could contain adversarial text designed to manipulate the auditor prompt.
+- **Hallucination detection** — citation verification layer: confirm cited chunk_id actually contains the quoted rule text.
+- **PII protection** — scrub personal data from transcripts before sending to LLM.
+- **Red teaming** — systematic attempts to produce false PASS verdicts on clearly non-compliant content.
+- **Governance** — audit trail of who approved what, policy version pinning per audit, model version logging.
+
+---
+
+### FS-5 — Fine-tuned Domain Model
+
+Train a smaller open-source model (Llama 3.1 8B or SaulLM-7B) on:
+- Platform policy documents (already fetching)
+- Labeled compliant/non-compliant ad claim examples (requires FS-3 golden dataset)
+- FTC enforcement case summaries
+
+Produces a model that speaks regulatory language natively. Prerequisite: golden dataset from FS-3.
