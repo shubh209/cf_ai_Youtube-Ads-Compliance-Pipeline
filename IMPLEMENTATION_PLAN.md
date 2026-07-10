@@ -822,3 +822,21 @@ Train a smaller open-source model (Llama 3.1 8B or SaulLM-7B) on:
 - FTC enforcement case summaries
 
 Produces a model that speaks regulatory language natively. Prerequisite: golden dataset from FS-3.
+
+---
+
+### FS-6 — Versioned Index Namespacing (replace wipe-and-replace)
+
+Instead of wiping the index on every reindex, stamp each chunk with `policy_version_id` and filter queries by the current version. Enables zero-downtime reindex and clean audit trail.
+
+**Flow:**
+- Weekly reindex: hash-check all 33 source pages
+- Changed pages (N): fetch, re-embed, store with new `policy_version_id`
+- Unchanged pages (33-N): copy chunk metadata to new `policy_version_id` (no re-embedding)
+- Atomic cutover: set `is_current=True` on new `PolicyVersion` DB row
+- Queries filter: `policy_version_id eq '{current_version_id}'`
+- Cleanup job: delete chunks from versions older than N weeks
+
+**Trigger:** when index exceeds 50K chunks, or reindex downtime becomes user-visible, or per-audit policy version traceability is required by a customer.
+
+**Files to change:** `policy_indexing.py` (stamp chunks), `policy_store.py` (add version filter to search), `src/db/repository.py` (get_current_policy_version already exists — wire it through).

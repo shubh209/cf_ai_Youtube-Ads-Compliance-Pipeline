@@ -120,6 +120,25 @@ def run_policy_index(
         logger.info("Fallback PDF indexing: %d chunks", len(all_splits))
 
     store = get_vector_store()
+
+    # ponytail: wipe-and-replace — delete all existing docs before adding new ones.
+    # Prevents embedding space mismatch when the OpenAI endpoint changes.
+    # Upgrade path: versioned index namespacing (see FS-6 in IMPLEMENTATION_PLAN.md)
+    #   when index size > 50K or per-audit version traceability is required.
+    try:
+        existing = store.similarity_search("policy", k=1000)
+        if existing:
+            ids_to_delete = [
+                doc.metadata.get("chunk_id") or doc.metadata.get("id")
+                for doc in existing
+                if doc.metadata.get("chunk_id") or doc.metadata.get("id")
+            ]
+            if ids_to_delete:
+                store.delete(ids_to_delete)
+                logger.info("Wiped %d existing chunks before reindex", len(ids_to_delete))
+    except Exception as exc:
+        logger.warning("Could not wipe existing chunks: %s — proceeding with append", exc)
+
     store.add_documents(documents=all_splits)
 
     version_label = datetime.now(timezone.utc).strftime("v%Y%m%d-%H%M%S")
