@@ -63,6 +63,7 @@ def _load_fallback_pdfs() -> list[Document]:
 def run_policy_index(
     db: Session | None = None,
     platforms: list[str] | None = None,
+    sources: list[dict] | None = None,
 ) -> dict:
     """
     Fetch policy sources, chunk, and upload to Azure AI Search.
@@ -70,17 +71,17 @@ def run_policy_index(
     Args:
         db: SQLAlchemy session for recording PolicyVersion. Optional.
         platforms: Optional list to limit re-indexing to specific platforms.
-                   If None, indexes all sources.
+        sources: Optional explicit list of source dicts (overrides POLICY_SOURCES + platforms).
     """
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     all_splits: list[Document] = []
     failed_sources: list[str] = []
 
-    sources = POLICY_SOURCES
+    active_sources = sources if sources is not None else POLICY_SOURCES
     if platforms:
-        sources = [s for s in POLICY_SOURCES if s["platform"] in platforms]
+        active_sources = [s for s in active_sources if s["platform"] in platforms]
 
-    for source in sources:
+    for source in active_sources:
         try:
             content = fetch_policy_source(source)
             source_meta = {

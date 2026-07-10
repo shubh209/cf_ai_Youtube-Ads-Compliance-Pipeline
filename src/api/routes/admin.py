@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -62,22 +62,28 @@ def list_policy_versions(
     ]
 
 
-@router.post("/policies/reindex", response_model=ReindexResponse)
-def reindex_policies(
+@router.post("/policies/reindex", status_code=202)
+async def reindex_policies(
+    background_tasks: BackgroundTasks,
     platforms: list[str] | None = Query(default=None),
     user: UserContext = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    try:
-        result = run_policy_index(db, platforms=platforms)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Reindex failed: {exc}") from exc
+    """Trigger policy reindex in the background. Returns 202 immediately."""
 
-    return ReindexResponse(
-        version_label=result["version_label"],
-        chunk_count=result["chunk_count"],
-        policy_version_id=result.get("policy_version_id"),
-    )
+    def _run(platforms):
+        from src.db.session import SessionLocal
+        bg_db = SessionLocal()
+        try:
+            run_policy_index(bg_db, platforms=platforms)
+        except Exception as exc:
+            import logging
+            logging.getLogger("api-server").error("Background reindex failed: %s", exc)
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_run, platforms)
+    return {"status": "reindex started", "message": "Indexing running in background. Check /admin/policies/versions for completion."}
 
 
 @router.post("/api-keys", response_model=ApiKeyCreateResponse)
