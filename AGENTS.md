@@ -102,6 +102,7 @@ Skills are in `~/.kiro/skills/`. Use them — they are there for a reason.
 **Misc:**
 - `setup-pre-commit` — add Husky/lint-staged hooks.
 - `git-guardrails-claude-code` — block dangerous git commands.
+- `prompt-master` — generate optimized prompts for any AI tool (LLMs, Cursor, Midjourney, coding agents). Use when asked to write, fix, or improve a prompt for a specific tool.
 
 **When to suggest a new skill:** if you catch yourself writing the same prompt pattern, debugging loop, or boilerplate sequence more than twice in a session, stop and suggest `/write-a-skill` to the user.
 
