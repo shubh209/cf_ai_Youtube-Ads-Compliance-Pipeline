@@ -61,30 +61,48 @@ class YouTubeTranscriptService:
             "platform": "youtube",
         }
 
+    def _fetch_captions(self, video_id: str) -> str:
+        """
+        Fetch spoken transcript via youtube-transcript-api (auto-captions or manual).
+        Returns empty string if unavailable — caller falls back to metadata.
+        ponytail: no caching, no language fallback beyond 'en'. Add when needed.
+        """
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            api = YouTubeTranscriptApi()
+            fetched = api.fetch(video_id)
+            return " ".join(s.text for s in fetched.snippets)
+        except Exception as exc:
+            logger.info("Caption fetch unavailable for %s: %s", video_id, exc)
+            return ""
+
     def extract_data(self, video_url: str) -> dict:
         """
         Main entry point — extracts all available text data from a YouTube video.
-        Uses title + description + tags as the transcript for compliance auditing.
+        Prefers spoken captions; falls back to title + description + tags.
         """
         video_id = _extract_video_id(video_url)
         logger.info(f"Extracting data for video ID: {video_id}")
 
         metadata = self.get_video_metadata(video_id)
+        captions = self._fetch_captions(video_id)
 
         transcript_parts = []
 
         if metadata.get("title"):
             transcript_parts.append(f"Title: {metadata['title']}")
 
-        if metadata.get("description"):
-            transcript_parts.append(f"Description: {metadata['description']}")
-
-        if metadata.get("tags"):
-            transcript_parts.append(f"Tags: {', '.join(metadata['tags'])}")
+        if captions:
+            transcript_parts.append(f"Transcript: {captions}")
+        else:
+            if metadata.get("description"):
+                transcript_parts.append(f"Description: {metadata['description']}")
+            if metadata.get("tags"):
+                transcript_parts.append(f"Tags: {', '.join(metadata['tags'])}")
 
         transcript = "\n\n".join(transcript_parts)
 
-        logger.info(f"Extracted {len(transcript)} chars of text for video {video_id}")
+        logger.info(f"Extracted {len(transcript)} chars of text for video {video_id} (captions={'yes' if captions else 'no'})")
 
         return {
             "transcript": transcript,

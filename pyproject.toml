@@ -28,6 +28,7 @@ dependencies = [
     "yt-dlp>=2025.1.12",
     "google-api-python-client>=2.100.0",
     "google-auth>=2.23.0",
+    "youtube-transcript-api>=1.2.4",
     "alembic>=1.14.0",
     "pyjwt[crypto]>=2.10.0",
     "httpx>=0.28.0",
@@ -36,6 +37,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "azure-communication-email>=1.0.0",
     "langfuse>=2.0.0",
+    "youtube-transcript-api>=0.6.3",
 ]
 
 [tool.pytest.ini_options]
