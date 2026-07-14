@@ -39,8 +39,21 @@ def _llm(temperature: float = 0.1) -> AzureChatOpenAI:
     )
 
 
-def _mini_llm(temperature: float = 0.1) -> AzureChatOpenAI:
-    deployment = os.getenv("AZURE_OPENAI_MINI_DEPLOYMENT", "gpt-4o-mini")
+def _mini_llm(temperature: float = 0.1):
+    """Return a cheap/fast model for extraction tasks.
+    ponytail: uses Phi-4-mini on Azure AI Foundry if configured, falls back to GPT-4o.
+    """
+    phi_endpoint = os.getenv("PHI4_ENDPOINT")
+    phi_key = os.getenv("PHI4_API_KEY")
+    if phi_endpoint and phi_key:
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model="Phi-4-mini-instruct",
+            base_url=phi_endpoint,
+            api_key=phi_key,
+            temperature=temperature,
+        )
+    deployment = os.getenv("AZURE_OPENAI_MINI_DEPLOYMENT", "gpt-4o")
     return AzureChatOpenAI(
         azure_deployment=deployment,
         azure_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
