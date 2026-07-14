@@ -247,6 +247,12 @@ def _attach_citations(results: list[dict], chunks: list) -> list[dict]:
 def index_video_node(state: VideoAuditState) -> Dict[str, Any]:
     video_url = state.get("video_url")
     logger.info("--- [Node: Indexer] Processing: %s ---", video_url)
+
+    # ponytail: if transcript is pre-provided (upload/worker path), skip YouTube extraction
+    if state.get("transcript"):
+        logger.info("--- [Node: Indexer] Transcript pre-provided, skipping extraction ---")
+        return {"ingestion_source": "upload"}
+
     try:
         if not video_url:
             raise ValueError("No video_url provided in state.")
