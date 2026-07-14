@@ -48,6 +48,8 @@ python3 scripts/gate.py <phase_number>
 
 Phase 10 (current active phase) gates are in `scripts/gate.py → phase_10()`.
 
+Phase 10 subtasks 10.1–10.4 are complete (URL list, extraction schema, fetcher switch, indexing). Remaining: run live reindex (10.7 gate), then subtask 10.8 (risk buckets — already implemented in `_attach_citations`).
+
 All gates must pass before committing. If a gate fails, fix it — do not commit with known failures.
 
 ---
@@ -76,6 +78,8 @@ If you see a hook verification fail after a write, the file did not land. Re-rea
 ## Known issues with this codebase to watch for
 
 **The PAT warning:** `.env` line 30 has a `PAT=...` entry with a space that causes `command not found: PAT` in shell. This is harmless — ignore it.
+
+**AZURE_SEARCH_INDEX_NAME mismatch:** `.env` previously had `compliance-docs` but the live index is `brand-compliance-rules`. This caused zero-result retrieval for several sessions. If retrieval breaks again, check this value first.
 
 **AzureSearch.__del__ ImportError:** appears at the end of any script that uses the vector store. Harmless cleanup noise — ignore it.
 

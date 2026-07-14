@@ -29,6 +29,8 @@ POLICY_SOURCES: list[dict] = [
     {"id": "meta-health", "platform": "facebook", "name": "Meta Health and Wellness Ads", "url": "https://www.facebook.com/business/help/2005074656298868"},
     {"id": "meta-financial", "platform": "facebook", "name": "Meta Financial Services Policy", "url": "https://www.facebook.com/business/help/438252513416690"},
     {"id": "meta-misleading", "platform": "facebook", "name": "Meta Misleading Claims Policy", "url": "https://www.facebook.com/policies/ads/prohibited_content/misinformation"},
+    {"id": "meta-drugs", "platform": "facebook", "name": "Meta Drugs and Pharmaceuticals Policy", "url": "https://transparency.meta.com/en-us/policies/ad-standards/restricted-goods-services/drugs-pharmaceuticals/"},
+    {"id": "meta-personal-attributes", "platform": "facebook", "name": "Meta Personal Attributes Policy", "url": "https://transparency.meta.com/policies/ad-standards/objectionable-content/personal-attributes"},
     # TikTok
     {"id": "tiktok-ad-policy", "platform": "tiktok", "name": "TikTok Advertising Policies", "url": "https://ads.tiktok.com/help/article/tiktok-advertising-policies-industry-entry"},
     {"id": "tiktok-prohibited", "platform": "tiktok", "name": "TikTok Prohibited Content", "url": "https://ads.tiktok.com/help/article/prohibited-content-general-policy-for-ad-content-targeting"},

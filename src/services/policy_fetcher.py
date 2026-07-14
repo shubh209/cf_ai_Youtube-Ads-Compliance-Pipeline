@@ -29,6 +29,13 @@ EXTRACTION_SCHEMA = {
     }
 }
 
+_EXTRACT_PROMPT = (
+    "Extract the advertising compliance rules from this policy page. "
+    "List every specific prohibited item in what_is_prohibited as separate strings. "
+    "List permitted items in what_is_allowed. Be specific and exhaustive."
+)
+
+
 def _fetch_via_firecrawl(url: str) -> str:
     api_key = os.getenv("FIRECRAWL_API_KEY", "")
     if not api_key:
@@ -40,15 +47,15 @@ def _fetch_via_firecrawl(url: str) -> str:
         from firecrawl import FirecrawlApp
         app = FirecrawlApp(api_key=api_key)
 
-    # ponytail: using scrape (not extract) — extract requires async polling
-    # which is too slow for 33 URLs at index time. Structured JSON parsing
-    # happens in policy_indexing._content_to_documents via LLM extraction.
-    # Upgrade: use extract when Firecrawl async polling is acceptable.
-    result = app.scrape_url(url, formats=["markdown"])
-    content = result.markdown if hasattr(result, "markdown") else (result.get("markdown") or result.get("content") or "")
-    if not content:
-        raise ValueError(f"Firecrawl returned empty content for {url}")
-    return content
+    # ponytail: extract costs ~30 credits/URL vs 1 for scrape.
+    # Ceiling: 35 URLs x 30 = 1,050 credits per reindex.
+    # Upgrade: batch_scrape + GPT-4o-mini extraction if credit cost is prohibitive.
+    # extract is deprecated in firecrawl-py v4 but still synchronous and functional.
+    result = app.extract(urls=[url], schema=EXTRACTION_SCHEMA, prompt=_EXTRACT_PROMPT, timeout=90)
+    data = result.data if hasattr(result, "data") else (result.get("data") if isinstance(result, dict) else None)
+    if not data or not isinstance(data, dict):
+        raise ValueError(f"Firecrawl extract returned no structured data for {url}")
+    return json.dumps(data)
 
 
 def _save_to_blob(source_id: str, url: str, content: str) -> None:

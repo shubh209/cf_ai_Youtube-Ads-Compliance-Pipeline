@@ -14,26 +14,29 @@ The core product insight: existing tools check ad copy text. No tool checks the 
 
 ## Current state (as of last session)
 
-**Pipeline status: PARTIALLY BROKEN**
+**Pipeline status: RETRIEVAL FIXED — GPT-4o rate limit is current bottleneck**
 
 - Health endpoint: responding at `https://brand-guardian-api.wonderfulbay-f06178ea.eastus.azurecontainerapps.io/health`
-- Audit endpoint: returns `"No matching policy rules found for the extracted claims"` — retrieval is returning zero results
-- Root cause: Azure AI Search index had mixed embeddings from two different Azure OpenAI accounts (eastus vs eastus2). Index was deleted and rebuilt with 122 clean chunks using `brand-guardian-openai` (eastus2). Container App revision was restarted. Awaiting confirmation that retrieval now works.
-- Next step: run a test audit and confirm violations are detected. If still failing, the issue is the vector store singleton caching — needs investigation.
+- Retrieval: working. Root cause of zero-violation output was `AZURE_SEARCH_INDEX_NAME="compliance-docs"` in `.env` — the rebuilt index is named `brand-compliance-rules`. Fixed locally and in Container App (`az containerapp update --set-env-vars`).
+- Audit endpoint: fails with `429 rate_limit_exceeded` on GPT-4o (brand-guardian-openai, eastus2). Current quota is 10K TPM — too low for a full audit call. Needs quota increase in Azure OpenAI Studio before end-to-end audits can run.
+- Phase 10 subtasks 10.1–10.4 complete: URL list expanded to 35, EXTRACTION_SCHEMA validated, fetcher switched from scrape to extract, indexing chunks structured JSON per-rule. Reindex against live Azure index not yet run — awaiting user confirmation (costs ~1,050 Firecrawl credits).
 
 **What is working:**
 - 4-stage audit pipeline (claim extraction → retrieval → GPT-4o reasoning → synthesis)
-- Per-claim retrieval with query expansion
+- Per-claim retrieval with query expansion (`_expand_claim` rewrites to policy terminology)
 - Chain-of-thought system prompt
 - Risk level output (HIGH/MEDIUM/LOW) per violation
 - Azure Container Apps deployment (GHCR images)
 - Neon PostgreSQL with all migrations applied (003_new_architecture)
-- Azure AI Search index `brand-compliance-rules` freshly rebuilt
-- Policy sources: 33 leaf-level URLs across YouTube (15), Meta (5), TikTok (4), X (5), FTC (2)
+- Azure AI Search index `brand-compliance-rules` — 122 chunks, retrieval confirmed working locally
+- Policy sources: 35 leaf-level URLs across YouTube (15), Meta (8), TikTok (5), X (5), FTC (2)
 - Async admin reindex endpoint (returns 202, runs in background)
-- Firecrawl scraping with blob cache fallback
+- Firecrawl structured extraction with blob cache fallback (switched from scrape to extract)
+- Semantic hybrid search with fallback (`semantic_hybrid_search_with_score` → `similarity_search_with_score`)
 
 **What is NOT working / not yet built:**
+- GPT-4o TPM quota too low (10K TPM on brand-guardian-openai). Raise to ≥50K in Azure OpenAI Studio to unblock end-to-end audits.
+- Live reindex with new structured extraction not yet run (needs user confirmation — ~1,050 Firecrawl credits for 35 URLs)
 - Pre-upload video mode (worker + Azure Storage Queue) — code exists, worker Container App not created in Azure yet
 - Email delivery (code exists, Azure Communication Services resource not created)
 - Frontend auth flow (no MSAL / API key entry UI)
@@ -118,8 +121,8 @@ Skills are in `~/.kiro/skills/`. Use them — they are there for a reason.
 | `scripts/gate.py` | Quality gate runner. Run `python3 scripts/gate.py <phase>` after completing a phase |
 | `src/pipeline/nodes.py` | Core 4-stage audit pipeline: claim extraction → retrieval → reasoning → synthesis |
 | `src/services/policy_store.py` | Vector store singleton, retrieval, score filtering |
-| `src/services/policy_fetcher.py` | Firecrawl scraping with blob cache fallback |
-| `src/services/policy_sources.py` | Registry of 33 leaf-level policy URLs |
+| `src/services/policy_fetcher.py` | Firecrawl structured extract with blob cache fallback |
+| `src/services/policy_sources.py` | Registry of 35 leaf-level policy URLs (YT=15, Meta=8, TikTok=5, X=5, FTC=2) |
 | `src/services/policy_indexing.py` | Chunking, wipe-and-replace reindex logic |
 | `src/api/server.py` | FastAPI app, /audit and /audit/upload endpoints |
 | `src/api/routes/admin.py` | Async reindex endpoint, API key management |
@@ -143,7 +146,7 @@ Skills are in `~/.kiro/skills/`. Use them — they are there for a reason.
 - **No Graph RAG** until golden dataset exists to measure improvement
 - **No LLM provider interface abstraction** until second provider is needed
 - **Wipe-and-replace** on reindex (not versioned namespacing — see FS-6 in plan for future upgrade path)
-- **Firecrawl /scrape not /extract** (extract uses async polling, too slow for batch indexing; 1 credit vs 30)
+- **Firecrawl /extract not /scrape** (switched in Phase 10 — extract returns structured JSON with `what_is_prohibited` items; costs ~30 credits/URL vs 1 for scrape; upgrade path: batch_scrape + GPT-4o-mini if credit cost is prohibitive)
 - **GPT-4o at temperature 0.1** with chain-of-thought reasoning
 - **Azure data residency required** — no DeepSeek, no Together.ai, no Groq
 

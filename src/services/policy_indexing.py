@@ -86,6 +86,7 @@ def run_policy_index(
             content = fetch_policy_source(source)
             source_meta = {
                 "source": source["name"],
+                "policy_name": source["name"],
                 "source_id": source["id"],
                 "platform": source["platform"],
                 "url": source["url"],
