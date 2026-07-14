@@ -84,7 +84,10 @@ def list_audits_for_team(
 def get_audit_for_team(db: Session, audit_id: uuid.UUID, team_id: uuid.UUID) -> Audit | None:
     return (
         db.query(Audit)
-        .filter(Audit.id == audit_id, Audit.team_id == team_id)
+        .filter(
+            (Audit.id == audit_id) | (Audit.session_id == str(audit_id)),
+            Audit.team_id == team_id,
+        )
         .first()
     )
 
