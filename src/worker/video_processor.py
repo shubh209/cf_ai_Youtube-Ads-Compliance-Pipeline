@@ -13,7 +13,7 @@ logger = logging.getLogger("brand-guardian.worker")
 
 def transcribe(blob_url: str, audit_id: str) -> dict:
     """Download blob and transcribe via Azure OpenAI Whisper. Returns {text, segments}."""
-    import urllib.request
+    from azure.storage.blob import BlobClient
     from openai import AzureOpenAI
 
     client = AzureOpenAI(
@@ -25,7 +25,14 @@ def transcribe(blob_url: str, audit_id: str) -> dict:
     tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     try:
         tmp.close()
-        urllib.request.urlretrieve(blob_url, tmp.name)
+        # ponytail: download via connection string, not public URL (public access disabled)
+        conn_str = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+        container = os.getenv("AZURE_STORAGE_CONTAINER", "uploads")
+        # blob_url is like https://account.blob.../container/uploads/uuid.mp4 — extract blob name
+        blob_name = "/".join(blob_url.split("/")[4:])  # everything after container
+        blob = BlobClient.from_connection_string(conn_str, container, blob_name)
+        with open(tmp.name, "wb") as f:
+            f.write(blob.download_blob().readall())
         with open(tmp.name, "rb") as f:
             result = client.audio.transcriptions.create(model=os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "whisper"), file=f)
         return {"text": result.text, "segments": getattr(result, "segments", [])}
