@@ -27,7 +27,7 @@ def transcribe(blob_url: str, audit_id: str) -> dict:
         tmp.close()
         urllib.request.urlretrieve(blob_url, tmp.name)
         with open(tmp.name, "rb") as f:
-            result = client.audio.transcriptions.create(model="whisper-1", file=f)
+            result = client.audio.transcriptions.create(model=os.getenv("AZURE_OPENAI_WHISPER_DEPLOYMENT", "whisper"), file=f)
         return {"text": result.text, "segments": getattr(result, "segments", [])}
     finally:
         Path(tmp.name).unlink(missing_ok=True)
