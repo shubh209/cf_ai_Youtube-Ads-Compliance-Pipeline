@@ -48,7 +48,9 @@ python3 scripts/gate.py <phase_number>
 
 Phase 10 (current active phase) gates are in `scripts/gate.py → phase_10()`.
 
-Phase 10 subtasks 10.1–10.4 are complete (URL list, extraction schema, fetcher switch, indexing). Remaining: run live reindex (10.7 gate), then subtask 10.8 (risk buckets — already implemented in `_attach_citations`).
+Phase 10 subtasks 10.1–10.4 are complete (URL list, extraction schema, fetcher switch, indexing). Remaining: run live reindex (10.7 gate — needs user confirmation, costs Firecrawl credits).
+
+Pipeline is working end-to-end via upload path. Golden eval baseline is 80% (8/10). Focus has shifted from implementation to hardening (see "Future scope" in AGENTS.md).
 
 All gates must pass before committing. If a gate fails, fix it — do not commit with known failures.
 
@@ -88,6 +90,12 @@ If you see a hook verification fail after a write, the file did not land. Re-rea
 **PYTHONPATH:** must be set to `.` for all local runs. Tests fail with `ModuleNotFoundError: No module named 'src'` without it.
 
 **Vector store singleton:** `_store` in `policy_store.py` is a module-level singleton. After the Azure OpenAI endpoint changes, the Container App must be restarted to clear it. The singleton is not thread-safe across forked processes (noted in code comment).
+
+**Neon DB cold start:** test_auth.py and test_phase6_email.py hang when Neon is suspended. Adding `connect_timeout=10` to DATABASE_URL would fix this. For now, run tests file-by-file to isolate which ones depend on live DB.
+
+**Phi-4-mini endpoint format:** Uses standard OpenAI SDK (not AzureOpenAI). base_url is `https://shubh-llm-api-project.services.ai.azure.com/openai/v1`. The old `/api/projects/proj-default` path is the management endpoint, not inference.
+
+**YouTube bot detection:** Both youtube-transcript-api and yt-dlp are blocked on Azure Container Apps IPs. Upload path (Whisper) is the workaround. URL path returns metadata-only (title + description + tags) when deployed.
 
 ---
 

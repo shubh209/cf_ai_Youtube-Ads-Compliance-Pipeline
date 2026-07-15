@@ -1,0 +1,130 @@
+[
+  {
+    "id": "gold-001",
+    "name": "Supplement health claims - obvious violations",
+    "transcript": "Title: SlimFast Pro - Burn Fat 3X Faster\n\nTranscript: Hey guys, I lost 30 pounds in just 2 weeks using SlimFast Pro. It literally melts fat while you sleep. No exercise needed, no diet changes. Just take two capsules before bed and watch the pounds disappear. I went from 180 to 150 and I've never felt better. Use code SLIM50 for 50% off today only. Link in description.",
+    "platforms": ["youtube"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "health_claim", "description": "Unsubstantiated weight loss claim (30 pounds in 2 weeks)"},
+      {"category": "health_claim", "description": "Unsubstantiated mechanism claim (melts fat while you sleep)"},
+      {"category": "misleading", "description": "Unrealistic results without effort (no exercise, no diet)"},
+      {"category": "disclosure", "description": "No sponsorship/paid promotion disclosure"}
+    ],
+    "min_violations": 2,
+    "notes": "Should trigger health_claim and misleading at minimum. Disclosure may or may not be caught depending on retrieval."
+  },
+  {
+    "id": "gold-002",
+    "name": "Clean brand ad - no violations",
+    "transcript": "Title: Nike Air Max 2026 - Just Do It\n\nTranscript: Introducing the all-new Nike Air Max 2026. Redesigned from the ground up with our most responsive cushioning ever. Available in six colorways. Find your pair at nike.com.",
+    "platforms": ["youtube"],
+    "expected_status": "PASS",
+    "expected_violations": [],
+    "min_violations": 0,
+    "notes": "No health claims, no misleading content, no missing disclosures. Pipeline should return PASS."
+  },
+  {
+    "id": "gold-003",
+    "name": "Financial product - guaranteed returns",
+    "transcript": "Title: CryptoWealth AI - Guaranteed 500% Returns\n\nTranscript: Are you tired of working 9 to 5? With CryptoWealth AI, you're guaranteed to make at least 500 percent returns on your investment. Our AI algorithm has never lost money. Zero risk, maximum reward. Join 50,000 happy investors who quit their jobs. Start with just 100 dollars today and retire in 6 months. This is not financial advice but trust me it works.",
+    "platforms": ["youtube"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "financial", "description": "Guaranteed returns claim (500% returns guaranteed)"},
+      {"category": "misleading", "description": "Zero risk claim on investment product"},
+      {"category": "misleading", "description": "Unrealistic income claims (retire in 6 months)"},
+      {"category": "financial", "description": "Contradictory disclaimer (says not financial advice while making financial promises)"}
+    ],
+    "min_violations": 2,
+    "notes": "Clear financial policy violations. The 'not financial advice' disclaimer doesn't absolve the claims."
+  },
+  {
+    "id": "gold-004",
+    "name": "Endorsement without disclosure",
+    "transcript": "Title: My Honest Review of GlowSkin Serum\n\nTranscript: So I've been using GlowSkin Serum for about a month now and oh my god you guys my skin has never looked better. The dark spots are completely gone, my wrinkles have disappeared, I look 10 years younger. I genuinely recommend this to everyone. Use my code SARAH20 for 20 percent off.",
+    "platforms": ["youtube"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "disclosure", "description": "Paid endorsement not disclosed (affiliate code without sponsorship disclosure)"},
+      {"category": "health_claim", "description": "Unsubstantiated cosmetic claims (wrinkles disappeared, 10 years younger)"}
+    ],
+    "min_violations": 1,
+    "notes": "FTC requires clear disclosure when affiliate codes are used. Cosmetic 'cure' claims are prohibited. The word 'honest' doesn't substitute for #ad."
+  },
+  {
+    "id": "gold-005",
+    "name": "Personal attributes violation (Meta-style)",
+    "transcript": "Title: Struggling with Depression? We Can Help\n\nTranscript: Are you feeling depressed? Do you wake up every morning feeling worthless? Are you struggling with anxiety that won't go away? You're not alone. Our online therapy platform connects you with licensed therapists in minutes. Stop suffering in silence. Get help today at BetterMind dot com.",
+    "platforms": ["youtube", "facebook"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "health_claim", "description": "Implies user has a medical/mental health condition (depression, anxiety)"},
+      {"category": "prohibited", "description": "Personal attributes - asserts knowledge of user's mental health state"}
+    ],
+    "min_violations": 1,
+    "notes": "Meta's Personal Attributes policy: ads must not assert or imply personal attributes including medical conditions. YouTube also restricts implying user health status."
+  },
+  {
+    "id": "gold-006",
+    "name": "Alcohol ad with responsible messaging",
+    "transcript": "Title: Jameson Irish Whiskey - Smooth Sipping\n\nTranscript: Jameson Irish Whiskey. Triple distilled for exceptional smoothness. Best enjoyed responsibly with friends. Must be 21 or older to purchase. Please drink responsibly. Available at select retailers nationwide.",
+    "platforms": ["youtube"],
+    "expected_status": "PASS",
+    "expected_violations": [],
+    "min_violations": 0,
+    "notes": "Alcohol ads are restricted but not prohibited on YouTube when they include responsible drinking messaging and age gates. This should PASS."
+  },
+  {
+    "id": "gold-007",
+    "name": "Gambling ad with missing restrictions",
+    "transcript": "Title: BetKing - Win Big Tonight\n\nTranscript: Download BetKing now and get a free 500 dollar bonus on your first deposit. Our odds are the best in the industry. Win up to 10,000 dollars on tonight's game. No experience needed, anyone can win. Start betting in seconds with just your phone number.",
+    "platforms": ["youtube"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "gambling", "description": "No responsible gambling messaging or helpline"},
+      {"category": "misleading", "description": "Implies guaranteed winnings (anyone can win, win big)"},
+      {"category": "restricted", "description": "No age restriction disclaimer for gambling content"}
+    ],
+    "min_violations": 1,
+    "notes": "YouTube gambling ads require responsible gambling messaging, age disclaimers, and must not imply guaranteed winnings."
+  },
+  {
+    "id": "gold-008",
+    "name": "Before/After weight loss imagery described",
+    "transcript": "Title: TransformFit 30 Day Challenge Results\n\nTranscript: Check out these incredible before and after results. On the left you can see Sarah at 200 pounds looking miserable. And on the right, just 30 days later, she's down to 160 pounds and looking amazing. These results are typical for our program. No surgery, no drugs, just our patented meal plan.",
+    "platforms": ["youtube", "facebook"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "health_claim", "description": "Unsubstantiated weight loss claim (40 pounds in 30 days)"},
+      {"category": "misleading", "description": "Claims results are typical when they are clearly exceptional"},
+      {"category": "prohibited", "description": "Before/after comparison with body shaming language (looking miserable)"}
+    ],
+    "min_violations": 2,
+    "notes": "Meta explicitly prohibits before/after imagery. YouTube prohibits unsubstantiated weight loss claims. Claiming atypical results are 'typical' is FTC violation."
+  },
+  {
+    "id": "gold-009",
+    "name": "Legitimate educational content",
+    "transcript": "Title: How Sunscreen SPF Ratings Work - Dermatologist Explains\n\nTranscript: Hi I'm Dr. Chen, board-certified dermatologist. Today I want to explain how SPF ratings actually work. SPF 30 blocks about 97 percent of UVB rays, while SPF 50 blocks about 98 percent. The difference is small but matters for prolonged sun exposure. No sunscreen blocks 100 percent. Always reapply every 2 hours. This video is for educational purposes only and is not medical advice for your specific situation.",
+    "platforms": ["youtube"],
+    "expected_status": "PASS",
+    "expected_violations": [],
+    "min_violations": 0,
+    "notes": "Educational content with proper credentials, accurate claims, appropriate disclaimers. Should PASS."
+  },
+  {
+    "id": "gold-010",
+    "name": "Urgency scam with fake scarcity",
+    "transcript": "Title: LAST CHANCE - Only 3 Left in Stock\n\nTranscript: WARNING. This is your absolute last chance. We only have 3 units left of our exclusive wealth-building course and once they're gone, they're gone forever. This 10,000 dollar program is yours today for just 97 dollars. But you must act NOW. The timer is counting down. If you don't buy in the next 5 minutes this offer disappears and you'll regret it for the rest of your life. Don't be a loser. Take action.",
+    "platforms": ["youtube"],
+    "expected_status": "FAIL",
+    "expected_violations": [
+      {"category": "misleading", "description": "Fake scarcity and urgency tactics (only 3 left, timer, disappears forever)"},
+      {"category": "misleading", "description": "Inflated original price to create false value perception ($10,000 to $97)"},
+      {"category": "prohibited", "description": "Pressure tactics and emotional manipulation (you'll regret it, don't be a loser)"}
+    ],
+    "min_violations": 2,
+    "notes": "YouTube and FTC prohibit deceptive urgency, fake scarcity, and pressure tactics. The language is textbook manipulation."
+  }
+]

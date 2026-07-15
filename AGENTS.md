@@ -14,33 +14,46 @@ The core product insight: existing tools check ad copy text. No tool checks the 
 
 ## Current state (as of last session)
 
-**Pipeline status: RETRIEVAL FIXED — GPT-4o rate limit is current bottleneck**
+**Pipeline status: E2E WORKING — Upload path confirmed, eval baseline established**
 
 - Health endpoint: responding at `https://brand-guardian-api.wonderfulbay-f06178ea.eastus.azurecontainerapps.io/health`
-- Retrieval: working. Root cause of zero-violation output was `AZURE_SEARCH_INDEX_NAME="compliance-docs"` in `.env` — the rebuilt index is named `brand-compliance-rules`. Fixed locally and in Container App (`az containerapp update --set-env-vars`).
-- Audit endpoint: fails with `429 rate_limit_exceeded` on GPT-4o (brand-guardian-openai, eastus2). Current quota is 10K TPM — too low for a full audit call. Needs quota increase in Azure OpenAI Studio before end-to-end audits can run.
-- Phase 10 subtasks 10.1–10.4 complete: URL list expanded to 35, EXTRACTION_SCHEMA validated, fetcher switched from scrape to extract, indexing chunks structured JSON per-rule. Reindex against live Azure index not yet run — awaiting user confirmation (costs ~1,050 Firecrawl credits).
+- Upload path (primary): User uploads MP4 → blob storage → queue → worker transcribes with Whisper → 4-stage audit → result stored in Postgres → polling returns violations. Confirmed working.
+- URL path (secondary): Metadata-only on deployed server (YouTube bot-detects Azure IPs). Works locally via youtube-transcript-api. Useful for quick title/description screening but not full transcript.
+- GPT-4o quota: raised to 50K TPM. No longer a bottleneck.
+- Multi-model: Phi-4-mini-instruct on Azure AI Foundry handles claim extraction + report synthesis. GPT-4o handles policy reasoning only. Reduces token cost significantly.
+- Golden eval: 8/10 (80%) baseline established. Two failures: personal attributes (retrieval gap) and before/after (insufficient violation count). Both improve after reindex.
+- Worker Container App: `brand-guardian-worker` deployed, running, picks up jobs from Azure Storage Queue.
+- Whisper deployment: `whisper` on brand-guardian-openai (eastus2), rate limit 1 req/60s.
 
 **What is working:**
-- 4-stage audit pipeline (claim extraction → retrieval → GPT-4o reasoning → synthesis)
+- 4-stage audit pipeline (Phi-4-mini claim extraction → per-claim retrieval + rerank → GPT-4o reasoning → Phi-4-mini synthesis)
 - Per-claim retrieval with query expansion (`_expand_claim` rewrites to policy terminology)
-- Chain-of-thought system prompt
+- Cross-encoder reranking (ms-marco-MiniLM-L-6-v2)
+- Chain-of-thought system prompt on GPT-4o
 - Risk level output (HIGH/MEDIUM/LOW) per violation
-- Azure Container Apps deployment (GHCR images)
+- Azure Container Apps deployment: API + Worker (GHCR images, CI/CD on push to main)
 - Neon PostgreSQL with all migrations applied (003_new_architecture)
-- Azure AI Search index `brand-compliance-rules` — 122 chunks, retrieval confirmed working locally
+- Azure AI Search index `brand-compliance-rules` — 122 chunks, retrieval confirmed working
 - Policy sources: 35 leaf-level URLs across YouTube (15), Meta (8), TikTok (5), X (5), FTC (2)
 - Async admin reindex endpoint (returns 202, runs in background)
-- Firecrawl structured extraction with blob cache fallback (switched from scrape to extract)
-- Semantic hybrid search with fallback (`semantic_hybrid_search_with_score` → `similarity_search_with_score`)
+- Firecrawl structured extraction with blob cache fallback
+- Video upload → Whisper transcription → async audit via worker
+- Golden evaluation dataset (10 synthetic cases, run via `evals/run_eval.py`)
+- Phi-4-mini-instruct integrated for cheap extraction tasks
+- youtube-transcript-api for caption fetching (works locally, blocked on Azure IPs)
 
 **What is NOT working / not yet built:**
-- GPT-4o TPM quota too low (10K TPM on brand-guardian-openai). Raise to ≥50K in Azure OpenAI Studio to unblock end-to-end audits.
-- Live reindex with new structured extraction not yet run (needs user confirmation — ~1,050 Firecrawl credits for 35 URLs)
-- Pre-upload video mode (worker + Azure Storage Queue) — code exists, worker Container App not created in Azure yet
+- Violations list not serialized to polling endpoint (report text is there, structured list isn't)
+- Worker has no retry logic — job lost if processing fails mid-audit
+- OCR on video frames (code exists, Azure AI Vision not configured; Tesseract planned)
+- Live reindex with structured extraction not yet run (costs ~1,050 Firecrawl credits)
+- Test suite hangs on Neon DB cold start (need connection timeout on DATABASE_URL)
 - Email delivery (code exists, Azure Communication Services resource not created)
 - Frontend auth flow (no MSAL / API key entry UI)
-- Langfuse observability (configured in code, not tested end-to-end)
+- Enrich node still tries yt-dlp/Video Indexer on upload path (wasted 5s latency on failed calls)
+- Containers run as root (no USER directive in Dockerfiles)
+- In-memory rate limiter resets on every deploy (Redis planned)
+- AUTH_DISABLED=TRUE in production Container App
 
 ---
 
@@ -135,20 +148,21 @@ Skills are in `~/.kiro/skills/`. Use them — they are there for a reason.
 
 ## Decisions already made — do not re-propose these
 
-- **No Redis** for rate limiting (in-memory is sufficient at current scale)
+- **No Redis** for rate limiting yet (in-memory is sufficient at current scale; Redis planned for distributed state)
 - **No Kafka / RabbitMQ / Service Bus** (Azure Storage Queue is sufficient)
-- **No sentence-transformers in the API image** (3GB PyTorch bloat, fallback to vector score order)
 - **No headroom-ai in production** (local dev tool only, removed from pyproject.toml)
 - **No streamlit** (replaced by index.html frontend)
 - **No Docker Compose** (single Container App per service)
 - **No microservices** (monolith deployed twice: API + Worker)
 - **No binary quantization / ONNX** until scale justifies it
 - **No Graph RAG** until golden dataset exists to measure improvement
-- **No LLM provider interface abstraction** until second provider is needed
+- **Multi-model: GPT-4o (reasoning) + Phi-4-mini (extraction/synthesis)** via Azure AI Foundry OpenAI-compatible endpoint
 - **Wipe-and-replace** on reindex (not versioned namespacing — see FS-6 in plan for future upgrade path)
-- **Firecrawl /extract not /scrape** (switched in Phase 10 — extract returns structured JSON with `what_is_prohibited` items; costs ~30 credits/URL vs 1 for scrape; upgrade path: batch_scrape + GPT-4o-mini if credit cost is prohibitive)
+- **Firecrawl /extract not /scrape** (switched in Phase 10 — extract returns structured JSON with `what_is_prohibited` items; costs ~30 credits/URL vs 1 for scrape; upgrade path: batch_scrape + Phi-4-mini extraction if credit cost is prohibitive)
 - **GPT-4o at temperature 0.1** with chain-of-thought reasoning
-- **Azure data residency required** — no DeepSeek, no Together.ai, no Groq
+- **Upload path is primary, URL path is secondary** — YouTube bot-detects Azure IPs; upload with Whisper gives full transcript
+- **Azure AI Search Free tier** — zero cost, supports 1 index (sufficient for current 122 chunks)
+- **No OCR yet** — Tesseract planned (zero-cost, ~50MB in Docker image); Azure AI Vision skipped (paid service)
 
 ---
 
@@ -156,15 +170,18 @@ Skills are in `~/.kiro/skills/`. Use them — they are there for a reason.
 
 | Resource | Type | Purpose |
 |---|---|---|
-| `brand-guardian-openai` (eastus2) | Azure OpenAI | GPT-4o + text-embedding-3-small — active endpoint |
-| `shubh-llm-api-project` (eastus) | Azure OpenAI | text-embedding-3-small only — do NOT use for chat |
-| `shubh-llm-ai-search` (centralus) | Azure AI Search Free | Vector store, index: `brand-compliance-rules` |
+| `brand-guardian-openai` (eastus2) | Azure OpenAI | GPT-4o (50K TPM) + text-embedding-3-small + Whisper |
+| `shubh-llm-api-project` (eastus) | Azure AI Foundry | Phi-4-mini-instruct (claim extraction + synthesis) |
+| `shubh-llm-ai-search` (centralus) | Azure AI Search Free | Vector store, index: `brand-compliance-rules` (122 chunks) |
 | `shubhllmproject` | Storage Account | Blob cache (policy-cache/), uploads, queue (audit-jobs) |
 | `brand-guardian-api` | Container App | API server, scale-to-zero |
+| `brand-guardian-worker` | Container App | Async video processing (Whisper + audit) |
 | `managedEnvironment-LLMyt-a71c` | Container Apps env | Shared environment |
 | Neon PostgreSQL | Serverless Postgres | Audit history, users, teams, violations |
 
-Container App URL: `https://brand-guardian-api.wonderfulbay-f06178ea.eastus.azurecontainerapps.io`
+Container App URLs:
+- API: `https://brand-guardian-api.wonderfulbay-f06178ea.eastus.azurecontainerapps.io`
+- Worker: no ingress (queue-triggered only)
 
 ---
 
@@ -175,3 +192,43 @@ Container App URL: `https://brand-guardian-api.wonderfulbay-f06178ea.eastus.azur
 - Never use heredocs in `execute_bash` (they hang)
 - Run `PYTHONPATH=. uv run pytest tests/ -q` before every commit
 - Max retries on any task: 4. If stuck after 4 attempts, stop and explain the problem to the user.
+
+---
+
+## Future scope — pick up from here
+
+Priority order for the next agent/session. Each item is independent unless noted.
+
+**P0 — Bugs blocking demo quality:**
+1. Fix violations list not serialized to polling endpoint (report text works, structured `compliance_results` list doesn't show in `GET /audits/{id}`)
+2. Add worker retry logic with dead-letter (currently job is lost on any failure)
+3. Add `connect_timeout=10` to DATABASE_URL so tests don't hang on Neon cold start
+4. Skip enrich node yt-dlp/Video Indexer calls when `audit_mode == "file"` (saves 5s wasted latency)
+
+**P1 — Eval improvements (raise 80% → 90%+):**
+5. Run live reindex with structured extraction (costs ~1,050 Firecrawl credits — ask user before running)
+6. Add personal attributes policy chunks (Meta transparency center) to index — fixes gold-005
+7. Add before/after + "results are typical" FTC chunks — fixes gold-008
+8. Re-run `evals/run_eval.py` after reindex to measure improvement
+
+**P2 — Security & hardening:**
+9. Add `USER nonroot` to both Dockerfiles
+10. Set AUTH_DISABLED=false on Container App + configure Entra or API key auth for demo
+11. Add timeout parameter to all GPT-4o / Phi-4 calls (prevent indefinite hangs)
+12. Redis for rate limiting (replace in-memory dict that resets on deploy)
+
+**P3 — Features:**
+13. OCR via Tesseract on video frames (code exists in video_processor.py, needs tesseract in worker Dockerfile + Azure AI Vision env vars removed)
+14. Blob cleanup job (delete uploads older than 7 days)
+15. Frontend: show individual violations with severity badges (currently only shows report text)
+16. Email delivery after audit completes (Azure Communication Services)
+
+**P4 — Cost & observability:**
+17. Token counting before GPT-4o calls (reject if over budget)
+18. Langfuse or Application Insights tracing end-to-end
+19. Cost model: calculate per-audit cost and surface to user
+
+**P5 — Architecture (only if needed):**
+20. Versioned index namespacing (FS-6) when index > 50K chunks
+21. Foundry IQ Knowledge Base migration (requires Basic or Serverless tier Azure AI Search)
+22. Residential proxy for URL-path full transcript (if URL scanning becomes primary use case again)

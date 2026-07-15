@@ -1,0 +1,325 @@
+[
+  {
+    "id": "gold-001",
+    "name": "Supplement health claims - obvious violations",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 2,
+    "actual_violations": 8,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "health_claim",
+        "description": "The claim 'SlimFast Pro burns fat 3X faster' is misleading and violates the Unreliable claims policy"
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'I lost 30 pounds in just 2 weeks using SlimFast Pro' is misleading and violates the Unrel"
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'SlimFast Pro melts fat while you sleep' is misleading and violates the Unreliable claims "
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'No exercise needed to lose weight with SlimFast Pro' is misleading and violates the Unrel"
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'No diet changes are required to lose weight with SlimFast Pro' is misleading and violates"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Take two capsules of SlimFast Pro before bed to lose weight' lacks scientific evidence an"
+      },
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'Use code SLIM50 for 50% off today only' does not violate any specific policy but should e"
+      },
+      {
+        "category": "disclosure",
+        "description": "The absence of disclosure about potential side effects or risks violates the Healthcare: Unapproved "
+      }
+    ],
+    "report_snippet": "The ad fails due to multiple critical violations of the Unreliable Claims policy, including misleading health claims such as \"SlimFast Pro burns fat 3X faster,\" \"I lost 30 pounds in just 2 weeks,\" and"
+  },
+  {
+    "id": "gold-002",
+    "name": "Clean brand ad - no violations",
+    "expected_status": "PASS",
+    "actual_status": "FAIL",
+    "status_correct": false,
+    "expected_min_violations": 0,
+    "actual_violations": 5,
+    "violation_count_ok": true,
+    "pass": false,
+    "violations": [
+      {
+        "category": "product_claim",
+        "description": "The claim 'Nike Air Max 2026 is redesigned from the ground up.' does not violate any specific policy"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Nike Air Max 2026 features the most responsive cushioning ever.' does not violate any spe"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Nike Air Max 2026 is available in six colorways.' does not violate any specific policy."
+      },
+      {
+        "category": "general",
+        "description": "The claim 'Nike Air Max 2026 can be found at nike.com.' does not violate any specific policy."
+      },
+      {
+        "category": "disclosure",
+        "description": "The absence of a disclosure may violate transparency requirements, especially if the video is a paid"
+      }
+    ],
+    "report_snippet": "The ad review failed primarily due to the absence of a disclosure, which may violate transparency requirements if the video is a paid promotion or advertisement. This issue is categorized as \"WARNING\""
+  },
+  {
+    "id": "gold-003",
+    "name": "Financial product - guaranteed returns",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 2,
+    "actual_violations": 6,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'CryptoWealth AI guarantees at least 500 percent returns on your investment' violates the "
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'CryptoWealth AI's AI algorithm has never lost money' violates the policy against misleadi"
+      },
+      {
+        "category": "general",
+        "description": "The claim 'CryptoWealth AI offers zero risk and maximum reward' violates the policy against misleadi"
+      },
+      {
+        "category": "general",
+        "description": "The claim '50,000 happy investors have quit their jobs using CryptoWealth AI' may be unverifiable an"
+      },
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'You can start with just 100 dollars today and retire in 6 months' violates the policy aga"
+      },
+      {
+        "category": "disclosure",
+        "description": "The claim 'This is not financial advice' is insufficient as a disclosure and does not comply with th"
+      }
+    ],
+    "report_snippet": "The ad for CryptoWealth AI fails compliance due to multiple critical violations of policies against misleading representation and deceptive financial claims. Key issues include false guarantees of \"50"
+  },
+  {
+    "id": "gold-004",
+    "name": "Endorsement without disclosure",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 1,
+    "actual_violations": 5,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "health_claim",
+        "description": "The claim 'The dark spots are completely gone' implies a guaranteed medical or cosmetic outcome, whi"
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'My wrinkles have disappeared' implies a guaranteed medical or cosmetic outcome, which may"
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'I look 10 years younger' implies a guaranteed cosmetic outcome, which may mislead consume"
+      },
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'Use my code SARAH20 for 20 percent off' does not provide sufficient information about the"
+      },
+      {
+        "category": "disclosure",
+        "description": "The video lacks a disclosure indicating that the creator may have a material connection to the produ"
+      }
+    ],
+    "report_snippet": "The ad fails due to multiple critical violations. The claims \"The dark spots are completely gone,\" \"My wrinkles have disappeared,\" and \"I look 10 years younger\" imply guaranteed medical or cosmetic ou"
+  },
+  {
+    "id": "gold-005",
+    "name": "Personal attributes violation (Meta-style)",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 1,
+    "actual_violations": 3,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "health_claim",
+        "description": "The claims 'Are you feeling depressed?', 'Do you wake up every morning feeling worthless?', and 'Are"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Our online therapy platform connects you with licensed therapists in minutes' requires ve"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Get help today at BetterMind dot com' requires verification of the platform's compliance "
+      }
+    ],
+    "report_snippet": "The ad has failed compliance due to critical violations related to health claims that imply medical advice or diagnosis without proper disclaimers or verification of compliance with healthcare adverti"
+  },
+  {
+    "id": "gold-006",
+    "name": "Alcohol ad with responsible messaging",
+    "expected_status": "PASS",
+    "actual_status": "PASS",
+    "status_correct": true,
+    "expected_min_violations": 0,
+    "actual_violations": 5,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "product_claim",
+        "description": "The claim that 'Jameson Irish Whiskey is triple distilled for exceptional smoothness' does not viola"
+      },
+      {
+        "category": "general",
+        "description": "The claim that 'Jameson Irish Whiskey is best enjoyed responsibly with friends' does not violate any"
+      },
+      {
+        "category": "disclosure",
+        "description": "The disclosure 'Must be 21 or older to purchase Jameson Irish Whiskey' complies with advertising pol"
+      },
+      {
+        "category": "disclosure",
+        "description": "The disclosure 'Please drink responsibly' complies with advertising policies and does not violate an"
+      },
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'Jameson Irish Whiskey is available at select retailers nationwide' does not violate any s"
+      }
+    ],
+    "report_snippet": "The ad has passed compliance review with no violations identified. All claims, including product feature statements, responsible consumption messaging, age restrictions, and availability information, "
+  },
+  {
+    "id": "gold-007",
+    "name": "Gambling ad with missing restrictions",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 1,
+    "actual_violations": 4,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'Download BetKing now and get a free 500 dollar bonus on your first deposit.' lacks clear "
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Win up to 10,000 dollars on tonight's game.' lacks disclosure about the risks and conditi"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'Start betting in seconds with just your phone number.' may violate rules regarding comple"
+      },
+      {
+        "category": "disclosure",
+        "description": "The absence of disclosure violates the requirement for transparency in financial products and servic"
+      }
+    ],
+    "report_snippet": "The ad fails to comply with advertising standards due to multiple critical violations. The claim \"Download BetKing now and get a free 500 dollar bonus on your first deposit\" lacks clear and visible di"
+  },
+  {
+    "id": "gold-008",
+    "name": "Before/After weight loss imagery described",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 2,
+    "actual_violations": 5,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "health_claim",
+        "description": "The claim 'Sarah lost 40 pounds in 30 days' implies a rapid weight loss that could be considered a h"
+      },
+      {
+        "category": "health_claim",
+        "description": "The claim 'Sarah's transformation is typical for the program' is misleading as it generalizes result"
+      },
+      {
+        "category": "disclosure",
+        "description": "The claim 'The program does not involve surgery' is a disclosure and does not violate any specific p"
+      },
+      {
+        "category": "disclosure",
+        "description": "The claim 'The program does not involve drugs' is a disclosure and does not violate any specific pol"
+      },
+      {
+        "category": "product_claim",
+        "description": "The claim 'The program uses a patented meal plan' is a product claim and does not violate any specif"
+      }
+    ],
+    "report_snippet": "The ad has failed compliance due to two critical health claim violations. The claim \"Sarah lost 40 pounds in 30 days\" implies rapid weight loss comparable to prescription drugs or controlled substance"
+  },
+  {
+    "id": "gold-009",
+    "name": "Legitimate educational content",
+    "expected_status": "PASS",
+    "actual_status": "PASS",
+    "status_correct": true,
+    "expected_min_violations": 0,
+    "actual_violations": 0,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [],
+    "report_snippet": "No policy violations detected. The ad content passed all compliance checks."
+  },
+  {
+    "id": "gold-010",
+    "name": "Urgency scam with fake scarcity",
+    "expected_status": "FAIL",
+    "actual_status": "FAIL",
+    "status_correct": true,
+    "expected_min_violations": 2,
+    "actual_violations": 5,
+    "violation_count_ok": true,
+    "pass": true,
+    "violations": [
+      {
+        "category": "product_claim",
+        "description": "The claim 'Only 3 units left of our exclusive wealth-building course.' may be misleading if the scar"
+      },
+      {
+        "category": "pricing_claim",
+        "description": "The claim 'This 10,000 dollar program is yours today for just 97 dollars.' may violate dishonest pri"
+      },
+      {
+        "category": "general",
+        "description": "The claim 'If you don't buy in the next 5 minutes this offer disappears.' uses high-pressure tactics"
+      },
+      {
+        "category": "general",
+        "description": "The claim 'You'll regret it for the rest of your life if you don't buy.' uses fear-based tactics to "
+      },
+      {
+        "category": "general",
+        "description": "The claim 'Don't be a loser.' uses derogatory language to pressure the viewer into taking immediate "
+      }
+    ],
+    "report_snippet": "The ad fails compliance due to multiple critical violations. It includes misleading product claims, such as false scarcity (\"Only 3 units left\") and dishonest pricing practices (\"$10,000 program for $"
+  }
+]
